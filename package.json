@@ -7,7 +7,7 @@
     "generate-data": "node scripts/generate-release-data.js",
     "dev": "npm run generate-data && vite",
     "build": "npm run generate-data && tsc && vite build",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "typecheck": "npm run generate-data && tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",

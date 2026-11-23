@@ -1,6 +1,6 @@
 use async_std::future::timeout;
+use futures::channel::mpsc::channel;
 use futures::future::ready;
-use futures::{channel::mpsc::channel, FutureExt};
 use futures::{StreamExt, TryFutureExt};
 
 use std::time::Duration;
@@ -21,7 +21,7 @@ pub async fn gatt_connect(
 ) -> Result<bool, String> {
     let adapter = Adapter::default()
         .await
-        .ok_or("Failed to access the BT adapter".to_string())?;
+        .map_err(|e| format!("Failed to access the BT adapter: {}", e.message()))?;
 
     adapter
         .wait_available()
@@ -136,7 +136,7 @@ const ADAPTER_TIMEOUT: Duration = Duration::from_secs(2);
 #[command]
 pub async fn gatt_list_devices() -> Result<Vec<super::commands::AvailableDevice>, ()> {
     let adapter = Adapter::default()
-        .map(|a| a.ok_or(()))
+        .map_err(|_| ())
         .and_then(|a| async {
             timeout(ADAPTER_TIMEOUT, a.wait_available())
                 .await

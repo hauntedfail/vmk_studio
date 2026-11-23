@@ -7,7 +7,7 @@ license = "Apache-2.0"
 repository = "https://github.com/hauntedfail/vmk_studio"
 default-run = "vmk-studio"
 edition = "2021"
-rust-version = "1.60"
+rust-version = "1.77"
 
 [build-dependencies]
 tauri-build = { version = "2.0.0", features = [] }
@@ -16,7 +16,7 @@ tauri-build = { version = "2.0.0", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 tauri = { version = "2.0.0", features = [] }
-bluest = { version = "0.6.6", features = ["serde"] }
+bluest = { git = "https://github.com/alexmoon/bluest.git", rev = "de787d02a45dbc93ef9bbff6e387dc31651ec882", features = ["serde"] }
 async-std = "1.12.0"
 uuid = "1.6.1"
 futures = "0.3.30"
