@@ -1,27 +1,36 @@
 # VMK Studio
 
-A custom-firmware-aware fork of [ZMK Studio](https://github.com/zmkfirmware/zmk-studio), built for keyboards like the customised beekeeb **Toucan 2** where live keymap editing, custom devicetree behaviours, firmware parameter tuning, and safe UF2 updates all need to work together without clobbering custom bindings.
+**VMK Studio** is a dedicated desktop and web Studio app built specifically for the **beekeeb Toucan 2** split keyboard, forked from [ZMK Studio](https://github.com/zmkfirmware/zmk-studio).
 
-## What VMK Studio adds over upstream ZMK Studio
+Its purpose is to bring **QMK-grade features and customisability** onto **ZMK** — and make day-to-day keymap, firmware, display, and trackpad tuning effortless on Toucan 2 without stock ZMK Studio overwriting custom behaviours.
 
-- **Custom Overwrite Guard**: Detects custom firmware behaviours (parsed from `dts/*.dtsi` and non-stock Studio behaviours) as well as safety keys (`Studio Unlock`, `Bootloader`, `Reset`) and locks them against accidental overwrite until explicitly unlocked per key.
-- **2-Parameter & Implicit-Modifier Keycaps**: Displays both hold and tap keys on Mod-Tap / Layer-Tap, renders implicit HID modifiers (`L⌃`, `L⌘`, etc.), and fixes unsigned 32-bit modifier handling for `RightGUI`.
-- **Raw Binding Inspector**: Inspect and apply raw `(behaviorId, param1, param2)` values safely for custom behaviours whose parameter schemas are not handled by stock pickers.
-- **Snapshots, Diff & Selective Restore**: Capture live Studio keymap snapshots (compatible with `~/.local/share/toucan2/backups/`), compare against any saved snapshot visually, and restore individual keys or full layers without touching `Restore Stock Settings` (which is now gated behind an explicit `RESET` confirmation).
-- **Offline Inspection Mode**: Browse saved Studio snapshots and `config/toucan.keymap` on the physical layout even when the keyboard is not plugged in.
-- **Firmware Parameter Tuner**: Comment-preserving interactive sliders and toggles for:
-  - Hold-Tap / Mod-Tap & Layer-Tap (`quick-tap-ms`, `tapping-term-ms`, `flavor`),
-  - Azoteq TPS43 trackpad hardware (`sensitivity`, `scroll-sensitivity`, `scroll-angle`, `hold-time`, gestures, power management),
-  - Trackpad input processors (`zip_xy_scaler`, `zip_scroll_scaler`, `zip_zoom_mapper`, `two_finger_double_tap`, 3-finger swipes),
-  - Custom modules & power (`ZMK_CG_TOGGLE`, `TOUCAN_SPLIT_INPUT_RELAY`, idle/sleep timeouts, status screen style).
-- **Custom Behaviours Registry & Repo Editor**: Browse custom DTS behaviours and directly edit `toucan.keymap`, `cg_toggle.dtsi`, overlays, `.conf`, and `Kconfig` with live `git diff` and per-file revert.
-- **Test, Build & Half-Guarded Flash Pipeline**: Run host unit tests (`scripts/test-host.sh`), compile both halves via `scripts/build.sh` (`west`), verify SHA-256 checksums, and flash Left/Right UF2 images with `CURRENT.UF2` central-marker cross-flash protection.
+## Why VMK Studio (QMK features on ZMK, tailored for Toucan 2)
+
+Stock ZMK Studio only understands standard upstream behaviours and lacks first-class controls for custom firmware modules. VMK Studio bridges the gap between QMK power-user workflows and wireless ZMK hardware:
+
+- **QMK Features Brought to ZMK**:
+  - **QMK Release-Based Quick-Tap (`QUICK_TAP_TERM`)**: Direct tuning of `&mt` / `&lt` `quick-tap-ms`, `tapping-term-ms`, and Hold-Tap `flavor`.
+  - **Per-Endpoint Ctrl↔GUI Swap (`CG_TOGG` parity)**: Dedicated inspector and Kconfig controls for `cg_toggle/endpoints` (`src/cg_toggle.c`), which remembers an independent Ctrl↔GUI swap state per USB and BLE profile (`BLE 0`–`BLE 4`) so switching devices applies the target host's mapping automatically — together with OS-aware Pinch Zoom, Smart Zoom, and Browser Back/Forward.
+  - **Custom Devicetree Behaviours CRUD**: Visually create, edit, and delete custom DTS behaviours (`dts/cg_toggle.dtsi`) while protecting them from accidental overwrites in Live Studio.
+- **Toucan 2 Hardware Canvas (Keys + LCD Monitor + Trackpad)**:
+  - Renders Toucan 2's **42-key split matrix**, **left-half Sharp Memory LCD (`144×168` MIP)**, and **right-half Azoteq TPS43 Trackpad (`43×40mm`)** directly on the interactive canvas.
+  - Clicking the **LCD Monitor** or **Trackpad** opens focused hardware controls immediately and lays the groundwork for upcoming custom LCD widgets and advanced trackpad gesture customisation.
+- **Custom Overwrite Guard & Live Keymap Safety**:
+  - Locks custom behaviours and safety keys (`Studio Unlock`, `Bootloader`, `Reset`) against accidental overwrite until explicitly unlocked per key.
+  - Displays 2-parameter Hold-Tap labels, renders implicit HID modifiers (`L⌃`, `L⌘`, etc.), fixes unsigned 32-bit `RightGUI` modifiers, provides a Raw Binding Inspector, and gates `Restore Stock Settings` behind typing `RESET`.
+- **Visual Repo Keymap, Snapshots & Diff**:
+  - Visually edit `config/toucan.keymap` layers, Combos, and Conditional Layers with Undo/Redo and comment-preserving 12+12+12+6 DTS output.
+  - Capture live Studio keymap snapshots (compatible with `~/.local/share/toucan2/backups/`), inspect snapshots offline, diff visually, and selectively restore individual keys or layers.
+- **Fine-Grained Firmware & Helper Tuner**:
+  - Comment-preserving controls for `toucan_left.overlay` feature gates, `src/cg_zoom.c` & `src/cg_nav.c`, `toucan.dtsi` input processors and 3-finger swipes, `toucan_right.overlay` TPS43 hardware, `toucan_left.conf`/`toucan_right.conf` + `Kconfig` (`TOUCAN_SPLIT_INPUT_RELAY`, `CONFIG_TOUCAN_STATUS_SCREEN`), and `host/macos/Sources/Core/ZoomSmoother.swift`.
+- **Test, Build & Half-Guarded Flash Pipeline**:
+  - Run host unit tests (`scripts/test-host.sh`), compile both halves via `scripts/build.sh` (`west`), verify SHA-256 checksums, rebuild the macOS helper app, and flash Left/Right UF2 images with `CURRENT.UF2` central-marker cross-flash protection.
 
 ## Development
 
 ```sh
 npm install
-npm run typecheck     # Type-check app and Node plugin scripts
+npm run typecheck     # Generate release data & type-check app + Node scripts
 npm run lint:vmk      # Strict ESLint check on VMK Studio modules
 npm test              # Run unit and safety tests (Vitest)
 npm run dev           # Start web UI + local VMK firmware/build/flash API bridge

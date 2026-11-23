@@ -42,7 +42,10 @@ import type {
   VmkWorkspaceStatus,
 } from "./vmk/types";
 import { VisualRepoKeymapEditor } from "./vmk/components/VisualRepoKeymapEditor";
-import { FirmwareTunerView } from "./vmk/components/FirmwareTunerView";
+import {
+  FirmwareTunerView,
+  type TunerSection,
+} from "./vmk/components/FirmwareTunerView";
 import { CustomBehaviorsAndFilesView } from "./vmk/components/CustomBehaviorsAndFilesView";
 import { BuildAndFlashView } from "./vmk/components/BuildAndFlashView";
 import { Toaster, toast } from "@/components/ui/toast";
@@ -216,6 +219,8 @@ function App() {
   const [connectionAbort, setConnectionAbort] = useState(new AbortController());
 
   const [activeTab, setActiveTab] = useState<VmkTab>("keymap");
+  const [tunerInitialSection, setTunerInitialSection] =
+    useState<TunerSection>("cg");
   const [keymapSource, setKeymapSource] = useState<"live" | "repo">("live");
   const [selectedEditorFile, setSelectedEditorFile] = useState<string>("config/toucan.keymap");
   const [customPaths, setCustomPaths] = useState<Partial<VmkWorkspacePaths>>(() =>
@@ -417,10 +422,15 @@ function App() {
                   <Keyboard
                     deviceName={connectedDeviceName}
                     customBehaviors={firmwareModel?.customBehaviors}
+                    firmwareModel={firmwareModel}
                     snapshots={snapshots}
                     backupsDir={workspaceStatus?.paths.backupsDir}
                     onSnapshotSaved={() => refreshWorkspace()}
                     onSwitchToRepoKeymap={() => setKeymapSource("repo")}
+                    onSelectHardwareModule={(mod) => {
+                      setTunerInitialSection(mod === "lcd" ? "display" : "trackpad");
+                      setActiveTab("tuner");
+                    }}
                   />
                 ) : (
                   <VisualRepoKeymapEditor
@@ -439,17 +449,30 @@ function App() {
                       setSelectedEditorFile("config/toucan.keymap");
                       setActiveTab("files");
                     }}
+                    onEditRepoFile={(relPath) => {
+                      setSelectedEditorFile(relPath);
+                      setActiveTab("files");
+                    }}
+                    onOpenTunerSection={(sec) => {
+                      setTunerInitialSection(sec);
+                      setActiveTab("tuner");
+                    }}
                   />
                 ))}
 
               {activeTab === "tuner" && (
                 <FirmwareTunerView
                   firmwareModel={firmwareModel}
+                  initialSection={tunerInitialSection}
                   onModelUpdated={(nextModel) => {
                     setFirmwareModel(nextModel);
                     refreshWorkspace();
                   }}
                   onGoToBuild={() => setActiveTab("build")}
+                  onEditFile={(relPath) => {
+                    setSelectedEditorFile(relPath);
+                    setActiveTab("files");
+                  }}
                 />
               )}
 

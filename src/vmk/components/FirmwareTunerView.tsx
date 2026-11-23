@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   CustomCFeaturesTuning,
   FirmwareConfTuning,
@@ -11,26 +11,33 @@ import type {
   TrackpadProcessorTuning,
 } from "../types";
 import { applyFirmwarePatch, getGitDiff } from "../api";
+import { auditEndpointSwapBindings } from "../endpointAudit";
+import { ToucanLcdScreenPreview } from "./ToucanHardwareModules";
 import { CodeBlock } from "@/components/ui/code-block";
 import { toast } from "@/components/ui/toast";
 import {
+  Bluetooth,
   Cpu,
   GitCompare,
   Hammer,
+  Monitor,
   MousePointer2,
   RotateCcw,
   Save,
   Sparkles,
+  Usb,
   Zap,
 } from "lucide-react";
 
+export type TunerSection = "cg" | "holdtap" | "trackpad" | "display" | "system";
+
 interface FirmwareTunerViewProps {
   firmwareModel: FirmwareModel | null;
+  initialSection?: TunerSection;
   onModelUpdated: (model: FirmwareModel) => void;
   onGoToBuild: () => void;
+  onEditFile?: (relPath: string) => void;
 }
-
-type TunerSection = "cg" | "holdtap" | "trackpad" | "system";
 
 const MOD_OPTIONS = [
   "MOD_LCTL",
@@ -143,10 +150,12 @@ function SwitchRow({
 
 export const FirmwareTunerView = ({
   firmwareModel,
+  initialSection,
   onModelUpdated,
   onGoToBuild,
+  onEditFile,
 }: FirmwareTunerViewProps) => {
-  const [section, setSection] = useState<TunerSection>("cg");
+  const [section, setSection] = useState<TunerSection>(initialSection ?? "cg");
   const [holdTap, setHoldTap] = useState<HoldTapTuning | null>(null);
   const [tpHw, setTpHw] = useState<TrackpadHardwareTuning | null>(null);
   const [tpProc, setTpProc] = useState<TrackpadProcessorTuning | null>(null);
@@ -154,9 +163,21 @@ export const FirmwareTunerView = ({
   const [cFeats, setCFeats] = useState<CustomCFeaturesTuning | null>(null);
   const [smoother, setSmoother] = useState<HelperSmootherTuning | null>(null);
   const [conf, setConf] = useState<FirmwareConfTuning | null>(null);
+  const [lcdPreviewLayer, setLcdPreviewLayer] = useState("BASE");
 
   const [saving, setSaving] = useState(false);
   const [diffText, setDiffText] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialSection) {
+      setSection(initialSection);
+    }
+  }, [initialSection]);
+
+  const endpointAudit = useMemo(
+    () => auditEndpointSwapBindings(firmwareModel?.repoKeymapLayers ?? []),
+    [firmwareModel?.repoKeymapLayers]
+  );
 
   useEffect(() => {
     if (!firmwareModel) return;
@@ -246,8 +267,8 @@ export const FirmwareTunerView = ({
   }> = [
     {
       id: "cg",
-      title: "CG, Zoom & Nav",
-      subtitle: "cg_zoom.c · cg_nav.c · overlay",
+      title: "CG Swap, Zoom & Nav",
+      subtitle: "per-endpoint · cg_toggle · zoom",
       icon: <Sparkles className="w-3.5 h-3.5" />,
     },
     {
@@ -261,6 +282,12 @@ export const FirmwareTunerView = ({
       title: "Trackpad & Gestures",
       subtitle: "TPS43 · toucan.dtsi · swipes",
       icon: <MousePointer2 className="w-3.5 h-3.5" />,
+    },
+    {
+      id: "display",
+      title: "LCD Monitor",
+      subtitle: "144×168 MIP · nice_view_gem",
+      icon: <Monitor className="w-3.5 h-3.5" />,
     },
     {
       id: "system",
@@ -339,11 +366,114 @@ export const FirmwareTunerView = ({
             <>
               <div>
                 <h2 className="text-base font-semibold tracking-tight text-foreground">
-                  Custom Ctrl/GUI Swap, Pinch Zoom &amp; Browser Navigation
+                  Per-Endpoint Ctrl/GUI Swap, Pinch Zoom &amp; Browser Navigation
                 </h2>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Surgical edits to central overlay feature gates and custom C behaviors without disturbing stock ZMK files.
+                  QMK <code className="font-mono">CG_TOGG</code> parity on ZMK with automatic per-device state switching (<code className="font-mono">cg_toggle/endpoints</code>), plus overlay gates and OS-aware C behaviours.
                 </p>
+              </div>
+
+              <div className="vmk-card rounded-2xl p-5 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                      Per-Endpoint Device-Switch Swap — src/cg_toggle.c · cg_toggle/endpoints
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Each endpoint (USB and BLE profiles 0–4) stores its own persistent Ctrl↔GUI bit in a 32-bit Zephyr settings field. Switching devices via <code className="font-mono">&amp;bt BT_SEL</code> or <code className="font-mono">&amp;out</code> applies that host&apos;s swap state immediately on the next HID report (after ZMK clears the previous endpoint&apos;s report), and OS-aware Zoom, Smart Zoom, and Back/Forward follow automatically.
+                    </p>
+                  </div>
+                  {onEditFile && (
+                    <button
+                      type="button"
+                      onClick={() => onEditFile("src/cg_toggle.c")}
+                      className="h-7 px-2.5 rounded-lg bg-recess border border-border text-[11px] font-mono text-foreground hover:bg-muted shrink-0"
+                    >
+                      Open src/cg_toggle.c
+                    </button>
+                  )}
+                </div>
+
+                <div className="border-t border-border pt-1">
+                  <SwitchRow
+                    label="Enable Per-Endpoint Ctrl↔GUI Swap (CONFIG_ZMK_CG_TOGGLE)"
+                    hint="Report-stage modifier exchange matching QMK CG_TOGG, scoped per USB / BLE endpoint."
+                    checked={conf.cgToggleEnabled}
+                    onChange={(v) => setConf({ ...conf, cgToggleEnabled: v })}
+                  />
+                  <NumberRow
+                    label="Flash Persistence Debounce (CONFIG_ZMK_CG_TOGGLE_SAVE_DELAY_MS)"
+                    hint="Writes cg_toggle/endpoints to flash after this delay and flushes synchronously before deep sleep."
+                    value={conf.cgToggleSaveDelayMs}
+                    min={0}
+                    max={60000}
+                    step={250}
+                    unit="ms"
+                    onChange={(v) => setConf({ ...conf, cgToggleSaveDelayMs: v })}
+                  />
+                  <SwitchRow
+                    label="Modifier Translation Debug Log (CONFIG_ZMK_CG_TOGGLE_DEBUG)"
+                    hint="Log every HID modifier swap event via ZMK logging."
+                    checked={conf.cgToggleDebug}
+                    onChange={(v) => setConf({ ...conf, cgToggleDebug: v })}
+                  />
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    Endpoint Slots &amp; Device-Switch Bindings (config/toucan.keymap)
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                    {endpointAudit.endpoints.map((ep) => (
+                      <div
+                        key={ep.id}
+                        className="p-2.5 rounded-xl bg-recess border border-border flex flex-col gap-1"
+                      >
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                            {ep.transport === "usb" ? (
+                              <Usb className="w-3.5 h-3.5 text-[#FC4C01]" />
+                            ) : (
+                              <Bluetooth className="w-3.5 h-3.5 text-[#FC4C01]" />
+                            )}
+                            {ep.label}
+                          </span>
+                          <span className="text-[10px] font-mono text-muted-foreground">
+                            bit {ep.index}
+                          </span>
+                        </div>
+                        <div className="text-[10px] font-mono text-muted-foreground truncate">
+                          {ep.switchBindings.length > 0
+                            ? ep.switchBindings
+                                .map((b) => `${b.layerName} #${b.keyPosition} (${b.binding})`)
+                                .join(", ")
+                            : ep.transport === "usb"
+                              ? "Auto when USB preferred"
+                              : "Unbound in repo keymap"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-recess/70 border border-border text-[11px]">
+                    <span className="text-muted-foreground">
+                      Swap toggle keys in <code className="font-mono">toucan.keymap</code>:{" "}
+                      {endpointAudit.cgToggleBindings.length > 0 ? (
+                        <span className="font-mono text-foreground">
+                          {endpointAudit.cgToggleBindings
+                            .map((b) => `${b.layerName} #${b.keyPosition} (${b.binding})`)
+                            .join(", ")}
+                        </span>
+                      ) : (
+                        <span className="text-amber-500 font-medium">
+                          None in repo keymap (bound via Studio runtime or ready to assign in Keymap tab)
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-[10px] font-mono text-muted-foreground">
+                      State: persistent per slot on central half
+                    </span>
+                  </div>
+                </div>
               </div>
 
               <div className="vmk-card rounded-2xl px-5 py-2">
@@ -1009,6 +1139,133 @@ export const FirmwareTunerView = ({
                   <SwitchRow label="Switch X / Y" checked={tpHw.switchXy} onChange={(v) => setTpHw({ ...tpHw, switchXy: v })} />
                   <SwitchRow label="Invert Scroll Y" checked={tpHw.invertScrollY} onChange={(v) => setTpHw({ ...tpHw, invertScrollY: v })} />
                   <SwitchRow label="Power Management" checked={tpHw.enablePowerManagement} onChange={(v) => setTpHw({ ...tpHw, enablePowerManagement: v })} />
+                </div>
+              </div>
+            </>
+          )}
+
+          {section === "display" && (
+            <>
+              <div>
+                <h2 className="text-base font-semibold tracking-tight text-foreground">
+                  Toucan 2 Sharp Memory LCD (144×168 MIP)
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Configure the left-half monochrome Memory-in-Pixel status screen (<code className="font-mono">CONFIG_TOUCAN_STATUS_SCREEN</code>) and inspect LVGL widget modules in <code className="font-mono">boards/shields/nice_view_gem/</code>.
+                </p>
+              </div>
+
+              <div className="vmk-card rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-[180px_1fr] gap-5 items-center">
+                <div className="mx-auto w-[144px] h-[168px] rounded-xl p-2 bg-recess border border-border shadow-inner">
+                  <ToucanLcdScreenPreview
+                    styleIndex={conf.statusScreenStyle}
+                    layerName={lcdPreviewLayer}
+                    cgSwapEnabled={conf.cgToggleEnabled}
+                  />
+                </div>
+                <div className="space-y-3 text-xs">
+                  <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                    Live 144×168 Monochrome Preview
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(firmwareModel.repoKeymapLayers.filter((l) => !l.reserved).length > 0
+                      ? firmwareModel.repoKeymapLayers
+                          .filter((l) => !l.reserved)
+                          .map((l) => l.displayName || l.id)
+                      : ["BASE", "NAV", "SYM", "ADJ", "MOU"]
+                    ).map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => setLcdPreviewLayer(name)}
+                        className={`px-2 py-1 rounded-md border text-[11px] font-mono transition-colors ${
+                          lcdPreviewLayer === name
+                            ? "bg-[#FC4C01] border-[#FC4C01] text-white"
+                            : "bg-recess border-border text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Displayed on the left (central) half via SPI0 (<code className="font-mono">nice_view_spi</code> in <code className="font-mono">toucan_left.overlay</code>). Transitions to sleep artwork automatically when ZMK enters idle sleep ({Math.round(conf.idleSleepTimeoutMs / 60000)} min).
+                  </p>
+                  {onEditFile && (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => onEditFile("boards/shields/toucan/toucan_left.conf")}
+                        className="h-7 px-2.5 rounded-lg bg-recess border border-border text-[11px] font-mono text-foreground hover:bg-muted"
+                      >
+                        Edit toucan_left.conf
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onEditFile("boards/shields/toucan/toucan_left.overlay")}
+                        className="h-7 px-2.5 rounded-lg bg-recess border border-border text-[11px] font-mono text-foreground hover:bg-muted"
+                      >
+                        Edit toucan_left.overlay
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="vmk-card rounded-2xl p-5 space-y-3">
+                <div className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                  Status Screen Style — CONFIG_TOUCAN_STATUS_SCREEN
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                  {[
+                    {
+                      id: 0,
+                      title: "Style 0 — Classic",
+                      desc: "Compact monochrome readout with output, BLE profile, layer, and dual L/R battery bars.",
+                      files: "layer.c · profile.c · battery.c",
+                    },
+                    {
+                      id: 1,
+                      title: "Style 1 — Logo & Layer",
+                      desc: "Adds the Toucan emblem above the active layer name alongside profile and battery gauges.",
+                      files: "layer_logo.c · profile.c · battery.c",
+                    },
+                    {
+                      id: 2,
+                      title: "Style 2 — Arc + WPM Chart",
+                      desc: "Toucan 2 default: arc gauges for output, profile, layer, and L/R battery plus live WPM chart.",
+                      files: "layer_arc.c · profile_arc.c · chart.c",
+                    },
+                  ].map((opt) => {
+                    const active = conf.statusScreenStyle === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setConf({ ...conf, statusScreenStyle: opt.id })}
+                        className={`text-left p-3.5 rounded-xl border transition-all space-y-1.5 ${
+                          active
+                            ? "border-[#FC4C01] bg-[#FC4C01]/5 ring-1 ring-[#FC4C01]/30"
+                            : "border-border bg-recess/50 hover:bg-muted/60"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-semibold text-foreground">{opt.title}</span>
+                          {active && (
+                            <span className="text-[10px] font-mono text-[#FC4C01] font-semibold">
+                              ACTIVE
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          {opt.desc}
+                        </p>
+                        <div className="text-[10px] font-mono text-muted-foreground pt-1">
+                          {opt.files}
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </>

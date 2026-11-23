@@ -18,6 +18,8 @@
   --keycap-bg: #ffffff;
   --keycap-lip: #d8d8e0;
   --keycap-border: rgba(0, 0, 0, 0.1);
+  --vmk-lcd-bg: #d9dfd5;
+  --vmk-lcd-fg: #151815;
 }
 
 .dark {
@@ -36,6 +38,8 @@
   --keycap-bg: #222226;
   --keycap-lip: #0d0d0f;
   --keycap-border: rgba(255, 255, 255, 0.09);
+  --vmk-lcd-bg: #181c19;
+  --vmk-lcd-fg: #dce4d8;
 }
 
 html,

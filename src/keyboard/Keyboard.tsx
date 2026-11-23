@@ -33,9 +33,11 @@ import { deserializeLayoutZoom, LayoutZoom } from "./PhysicalLayout";
 import { useLocalStorageState } from "../misc/useLocalStorageState";
 import type {
   CustomBehaviorDef,
+  FirmwareModel,
   SnapshotSummary,
   StudioSnapshot,
 } from "../vmk/types";
+import type { ToucanHardwareModuleId } from "../vmk/components/ToucanHardwareModules";
 import { diffKeymapAgainstSnapshot } from "../vmk/customBehaviors";
 import { readSnapshot, saveSnapshot } from "../vmk/api";
 import { Camera, Check, GitCompare, RotateCcw, Shield, ShieldOff } from "lucide-react";
@@ -45,10 +47,12 @@ type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 export interface KeyboardProps {
   deviceName?: string;
   customBehaviors?: CustomBehaviorDef[];
+  firmwareModel?: FirmwareModel | null;
   snapshots?: SnapshotSummary[];
   backupsDir?: string;
   onSnapshotSaved?: () => Promise<void>;
   onSwitchToRepoKeymap?: () => void;
+  onSelectHardwareModule?: (module: ToucanHardwareModuleId) => void;
 }
 
 function useBehaviors(): BehaviorMap {
@@ -178,10 +182,12 @@ function useLayouts(): [
 export default function Keyboard({
   deviceName = "Toucan",
   customBehaviors = [],
+  firmwareModel,
   snapshots = [],
   backupsDir,
   onSnapshotSaved,
   onSwitchToRepoKeymap,
+  onSelectHardwareModule,
 }: KeyboardProps) {
   const [
     layouts,
@@ -771,6 +777,10 @@ export default function Keyboard({
             selectedLayerIndex={selectedLayerIndex}
             selectedKeyPosition={selectedKeyPosition}
             onKeyPositionClicked={setSelectedKeyPosition}
+            toucanHardware={{
+              firmwareModel,
+              onSelectModule: onSelectHardwareModule,
+            }}
           />
           <select
             className="absolute top-3 right-3 h-7 rounded-lg px-2 text-xs bg-surface border border-border text-foreground"

@@ -7,6 +7,14 @@ import {
 } from "react";
 import { Key } from "./Key";
 import type { BehaviorKind } from "../vmk/customBehaviors";
+import {
+  isToucanSplitLayout,
+  TOUCAN_HARDWARE_CANVAS_BOTTOM,
+} from "../vmk/toucanLayout";
+import {
+  ToucanHardwareModules,
+  type ToucanHardwareOverlayProps,
+} from "../vmk/components/ToucanHardwareModules";
 
 export type KeyPosition = PropsWithChildren<{
   id: string;
@@ -40,6 +48,7 @@ interface PhysicalLayoutProps {
   hoverZoom?: boolean;
   zoom?: LayoutZoom;
   onPositionClicked?: (position: number) => void;
+  toucanHardware?: ToucanHardwareOverlayProps;
 }
 
 interface PhysicalLayoutPositionLocation {
@@ -83,6 +92,7 @@ export const PhysicalLayout = ({
   onPositionClicked,
   hoverZoom: _hoverZoom,
   zoom,
+  toucanHardware,
 }: PhysicalLayoutProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
@@ -122,12 +132,18 @@ export const PhysicalLayout = ({
     };
   }, [zoom, positions.length]);
 
+  const showToucanHardware =
+    Boolean(toucanHardware) && isToucanSplitLayout(positions);
+
   const rightMost = positions
     .map((k) => k.x + k.width)
     .reduce((a, b) => Math.max(a, b), 0);
-  const bottomMost = positions
+  const keysBottomMost = positions
     .map((k) => k.y + k.height)
     .reduce((a, b) => Math.max(a, b), 0);
+  const bottomMost = showToucanHardware
+    ? Math.max(keysBottomMost, TOUCAN_HARDWARE_CANVAS_BOTTOM)
+    : keysBottomMost;
 
   const positionItems = positions.map((p, idx) => (
     <div key={p.id} className="absolute hover:z-10" style={scalePosition(p, oneU)}>
@@ -160,6 +176,9 @@ export const PhysicalLayout = ({
       ref={ref}
     >
       {positionItems}
+      {showToucanHardware && toucanHardware && (
+        <ToucanHardwareModules oneU={oneU} {...toucanHardware} />
+      )}
     </div>
   );
 };

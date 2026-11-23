@@ -20,7 +20,12 @@ import type {
   SnapshotSummary,
   StudioSnapshot,
 } from "../types";
-import { getGitDiff, readSnapshot, saveRepoKeymap } from "../api";
+import { applyFirmwarePatch, getGitDiff, readSnapshot, saveRepoKeymap } from "../api";
+import {
+  ToucanLcdScreenPreview,
+  type ToucanHardwareModuleId,
+} from "./ToucanHardwareModules";
+import type { TunerSection } from "./FirmwareTunerView";
 import { CodeBlock } from "@/components/ui/code-block";
 import { toast } from "@/components/ui/toast";
 import {
@@ -30,12 +35,15 @@ import {
   FileCode2,
   GitCompare,
   Lock,
+  Monitor,
+  MousePointer2,
   Plus,
   Redo2,
   RotateCcw,
   Save,
   Shield,
   ShieldOff,
+  Sliders,
   Trash2,
   Undo2,
   Unlock,
@@ -50,6 +58,8 @@ interface VisualRepoKeymapEditorProps {
   onModelUpdated: (model: FirmwareModel) => void;
   onOpenConnect: () => void;
   onEditKeymapFile: () => void;
+  onEditRepoFile?: (relPath: string) => void;
+  onOpenTunerSection?: (section: TunerSection) => void;
   onSwitchToLive?: () => void;
 }
 
@@ -193,9 +203,14 @@ export const VisualRepoKeymapEditor = ({
   isConnected = false,
   onModelUpdated,
   onEditKeymapFile,
+  onEditRepoFile,
+  onOpenTunerSection,
   onSwitchToLive,
 }: VisualRepoKeymapEditorProps) => {
   const [viewMode, setViewMode] = useState<"repo" | "snapshot">("repo");
+  const [selectedModule, setSelectedModule] =
+    useState<ToucanHardwareModuleId | null>(null);
+  const [savingHardware, setSavingHardware] = useState(false);
   const [selectedSnapshotRel, setSelectedSnapshotRel] = useState<string>(
     snapshots[0]?.relPath || ""
   );
@@ -328,6 +343,7 @@ export const VisualRepoKeymapEditor = ({
   const activeLayer = layers[selectedLayerIdx];
 
   const handleKeyClick = (pos: number) => {
+    setSelectedModule(null);
     if (viewMode === "repo" && subPanel === "combos" && pickingComboIdx !== null) {
       const target = combos[pickingComboIdx];
       if (!target) return;
@@ -341,6 +357,32 @@ export const VisualRepoKeymapEditor = ({
       return;
     }
     setSelectedKeyIdx(pos);
+  };
+
+  const handleSelectHardwareModule = (mod: ToucanHardwareModuleId) => {
+    setSelectedKeyIdx(undefined);
+    setSelectedModule((prev) => (prev === mod ? null : mod));
+  };
+
+  const handleQuickPatchHardware = async (
+    patch: Parameters<typeof applyFirmwarePatch>[1],
+    label: string
+  ) => {
+    if (!firmwareModel) return;
+    setSavingHardware(true);
+    try {
+      const res = await applyFirmwarePatch(firmwareModel.repoPath, patch);
+      onModelUpdated(res.model);
+      toast.success(`Updated ${label}`, {
+        description: res.changedFiles.join(", ") || "Already up to date",
+      });
+    } catch (e) {
+      toast.error(`Failed to update ${label}`, {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setSavingHardware(false);
+    }
   };
 
   const updateSelectedKeyBinding = (newExpr: string) => {
@@ -905,6 +947,16 @@ export const VisualRepoKeymapEditor = ({
             zoom="auto"
             selectedPosition={selectedKeyIdx}
             onPositionClicked={handleKeyClick}
+            toucanHardware={{
+              firmwareModel,
+              activeLayerName:
+                viewMode === "snapshot" && loadedSnapshot
+                  ? loadedSnapshot.layers[selectedLayerIdx]?.name ||
+                    `L${selectedLayerIdx}`
+                  : activeLayer?.displayName || activeLayer?.id || "BASE",
+              selectedModule,
+              onSelectModule: handleSelectHardwareModule,
+            }}
           />
         ) : (
           <div className="text-xs text-muted-foreground">
@@ -915,7 +967,231 @@ export const VisualRepoKeymapEditor = ({
 
       {/* Bottom Inspector Drawer */}
       <div className="col-start-2 bg-surface border-t border-border px-5 py-3.5 min-h-[12rem] max-h-[38vh] overflow-y-auto text-xs space-y-3">
-        {viewMode === "snapshot" ? (
+        {selectedModule === "lcd" && firmwareModel ? (
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="w-[84px] h-[98px] shrink-0 rounded-lg p-1 bg-recess border border-border">
+                <ToucanLcdScreenPreview
+                  styleIndex={firmwareModel.conf.statusScreenStyle}
+                  layerName={activeLayer?.displayName || "BASE"}
+                  cgSwapEnabled={firmwareModel.conf.cgToggleEnabled}
+                  compact
+                />
+              </div>
+              <div className="space-y-2 min-w-0">
+                <div className="flex items-center gap-2">
+                  <Monitor className="w-4 h-4 text-[#FC4C01]" />
+                  <span className="font-semibold text-foreground">
+                    Toucan 2 Sharp Memory LCD (144×168 MIP)
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-recess border border-border text-muted-foreground">
+                    Left Half · SPI0
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { id: 0, label: "0 · Classic" },
+                    { id: 1, label: "1 · Logo & Layer" },
+                    { id: 2, label: "2 · Arc + WPM" },
+                  ].map((opt) => {
+                    const active = firmwareModel.conf.statusScreenStyle === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        disabled={savingHardware}
+                        onClick={() =>
+                          handleQuickPatchHardware(
+                            {
+                              conf: {
+                                ...firmwareModel.conf,
+                                statusScreenStyle: opt.id,
+                              },
+                            },
+                            `LCD Style ${opt.id}`
+                          )
+                        }
+                        className={`h-7 px-2.5 rounded-lg border font-mono text-[11px] transition-colors disabled:opacity-50 ${
+                          active
+                            ? "bg-[#FC4C01] border-[#FC4C01] text-white"
+                            : "bg-recess border-border text-foreground hover:bg-muted"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Writes <code className="font-mono">CONFIG_TOUCAN_STATUS_SCREEN</code> in{" "}
+                  <code className="font-mono">boards/shields/toucan/toucan_left.conf</code>. Ready for custom LVGL widgets in <code className="font-mono">nice_view_gem/</code>.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {onEditRepoFile && (
+                <button
+                  type="button"
+                  onClick={() => onEditRepoFile("boards/shields/toucan/toucan_left.conf")}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-recess border border-border text-foreground hover:bg-muted"
+                >
+                  <FileCode2 className="w-3.5 h-3.5" />
+                  toucan_left.conf
+                </button>
+              )}
+              {onOpenTunerSection && (
+                <button
+                  type="button"
+                  onClick={() => onOpenTunerSection("display")}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-[#FC4C01] text-white font-medium hover:opacity-90"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  Open LCD Tuner
+                </button>
+              )}
+            </div>
+          </div>
+        ) : selectedModule === "trackpad" && firmwareModel ? (
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-2 min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <MousePointer2 className="w-4 h-4 text-[#FC4C01]" />
+                <span className="font-semibold text-foreground">
+                  Azoteq TPS43 Capacitive Trackpad (43×40mm)
+                </span>
+                <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-recess border border-border text-muted-foreground">
+                  Right Half · I2C0 · XY {firmwareModel.trackpadProcessors.xyScaleMul}/
+                  {firmwareModel.trackpadProcessors.xyScaleDiv} · Scroll{" "}
+                  {firmwareModel.trackpadProcessors.scrollScaleMul}/
+                  {firmwareModel.trackpadProcessors.scrollScaleDiv}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  {
+                    label: "Listener",
+                    active: firmwareModel.leftOverlayGates.trackpadListenerEnabled,
+                    onClick: () =>
+                      handleQuickPatchHardware(
+                        {
+                          leftOverlayGates: {
+                            ...firmwareModel.leftOverlayGates,
+                            trackpadListenerEnabled:
+                              !firmwareModel.leftOverlayGates.trackpadListenerEnabled,
+                          },
+                        },
+                        "Trackpad Listener"
+                      ),
+                  },
+                  {
+                    label: "Pinch Zoom",
+                    active: firmwareModel.leftOverlayGates.zipZoomMapperEnabled,
+                    onClick: () =>
+                      handleQuickPatchHardware(
+                        {
+                          leftOverlayGates: {
+                            ...firmwareModel.leftOverlayGates,
+                            zipZoomMapperEnabled:
+                              !firmwareModel.leftOverlayGates.zipZoomMapperEnabled,
+                          },
+                        },
+                        "Pinch Zoom Mapper"
+                      ),
+                  },
+                  {
+                    label: "2F Smart Zoom",
+                    active: firmwareModel.leftOverlayGates.twoFingerDoubleTapEnabled,
+                    onClick: () =>
+                      handleQuickPatchHardware(
+                        {
+                          leftOverlayGates: {
+                            ...firmwareModel.leftOverlayGates,
+                            twoFingerDoubleTapEnabled:
+                              !firmwareModel.leftOverlayGates.twoFingerDoubleTapEnabled,
+                          },
+                        },
+                        "Two-Finger Double Tap"
+                      ),
+                  },
+                  {
+                    label: "3F Swipe",
+                    active: firmwareModel.trackpadHardware.threeFingerSwipe,
+                    onClick: () =>
+                      handleQuickPatchHardware(
+                        {
+                          trackpadHardware: {
+                            ...firmwareModel.trackpadHardware,
+                            threeFingerSwipe:
+                              !firmwareModel.trackpadHardware.threeFingerSwipe,
+                          },
+                        },
+                        "Three-Finger Swipe"
+                      ),
+                  },
+                  {
+                    label: "Invert Scroll Y",
+                    active: firmwareModel.trackpadHardware.invertScrollY,
+                    onClick: () =>
+                      handleQuickPatchHardware(
+                        {
+                          trackpadHardware: {
+                            ...firmwareModel.trackpadHardware,
+                            invertScrollY: !firmwareModel.trackpadHardware.invertScrollY,
+                          },
+                        },
+                        "Invert Scroll Y"
+                      ),
+                  },
+                  {
+                    label: `Split Relay (Q=${firmwareModel.conf.splitInputRelayQueueSize})`,
+                    active: firmwareModel.conf.splitInputRelayEnabled,
+                    onClick: () =>
+                      handleQuickPatchHardware(
+                        {
+                          conf: {
+                            ...firmwareModel.conf,
+                            splitInputRelayEnabled:
+                              !firmwareModel.conf.splitInputRelayEnabled,
+                          },
+                        },
+                        "Split Input Relay"
+                      ),
+                  },
+                ].map((chip) => (
+                  <button
+                    key={chip.label}
+                    type="button"
+                    disabled={savingHardware}
+                    onClick={chip.onClick}
+                    className={`h-7 px-2.5 rounded-lg border text-[11px] font-medium transition-colors disabled:opacity-50 ${
+                      chip.active
+                        ? "bg-[#FC4C01]/15 border-[#FC4C01] text-foreground"
+                        : "bg-recess border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {chip.active ? "● " : "○ "}
+                    {chip.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Quick-toggles write directly to <code className="font-mono">toucan_left.overlay</code>, <code className="font-mono">toucan_right.overlay</code>, and <code className="font-mono">toucan_right.conf</code>.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {onOpenTunerSection && (
+                <button
+                  type="button"
+                  onClick={() => onOpenTunerSection("trackpad")}
+                  className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-[#FC4C01] text-white font-medium hover:opacity-90"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  Open Trackpad Tuner
+                </button>
+              )}
+            </div>
+          </div>
+        ) : viewMode === "snapshot" ? (
           <div>
             {selectedKeyIdx !== undefined && loadedSnapshot ? (
               (() => {

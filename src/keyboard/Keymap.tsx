@@ -10,6 +10,7 @@ import {
 } from "./PhysicalLayout";
 import { HidUsageLabel } from "./HidUsageLabel";
 import type { CustomBehaviorDef } from "../vmk/types";
+import type { ToucanHardwareOverlayProps } from "../vmk/components/ToucanHardwareModules";
 import {
   classifyBehavior,
   formatHex,
@@ -28,6 +29,7 @@ export interface KeymapProps {
   selectedLayerIndex: number;
   selectedKeyPosition: number | undefined;
   onKeyPositionClicked: (keyPosition: number) => void;
+  toucanHardware?: ToucanHardwareOverlayProps;
 }
 
 export const Keymap = ({
@@ -40,6 +42,7 @@ export const Keymap = ({
   selectedLayerIndex,
   selectedKeyPosition,
   onKeyPositionClicked,
+  toucanHardware,
 }: KeymapProps) => {
   const layer = keymap.layers[selectedLayerIndex];
   if (!layer) {
@@ -113,6 +116,14 @@ export const Keymap = ({
       zoom={scale}
       selectedPosition={selectedKeyPosition}
       onPositionClicked={onKeyPositionClicked}
+      toucanHardware={
+        toucanHardware
+          ? {
+              ...toucanHardware,
+              activeLayerName: layer.name || `L${selectedLayerIndex}`,
+            }
+          : undefined
+      }
     />
   );
 };
