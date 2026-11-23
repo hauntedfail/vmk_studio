@@ -121,11 +121,11 @@ export function unwrapZmkMods(expr: string): { mods: string[]; base: string } {
   const mods: string[] = [];
   let cur = expr.trim();
   const re = /^(LC|LS|LA|LG|RC|RS|RA|RG)\((.+)\)$/;
-  while (true) {
-    const m = cur.match(re);
-    if (!m) break;
+  let m = cur.match(re);
+  while (m) {
     mods.push(m[1]);
     cur = m[2].trim();
+    m = cur.match(re);
   }
   return { mods, base: cur };
 }

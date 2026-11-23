@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+      - "chore/**"
+      - "docs/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (Lint, Typecheck, Tests, Build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check version sync & changelog
+        run: node scripts/check-version-sync.mjs --require-changelog
+
+      - name: Type-check (app + node scripts)
+        run: npm run typecheck
+
+      - name: Lint VMK Studio modules
+        run: npm run lint:vmk
+
+      - name: Run Vitest suite
+        run: npm test
+
+      - name: Build production frontend
+        run: npm run build
+
+      - name: Smoke-test production bundle
+        run: node scripts/smoke-preview.mjs
+
+  rust:
+    name: Rust & Tauri (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+          - name: Linux
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux Tauri system dependencies
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libudev-dev \
+            libdbus-1-dev \
+            libssl-dev \
+            pkg-config
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Build frontend assets for Tauri context
+        run: |
+          npm ci
+          npm run build
+
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt --all --check
+
+      - name: Run Clippy (deny warnings)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run Rust unit tests
+        working-directory: src-tauri
+        run: cargo test --all-targets --all-features

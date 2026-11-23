@@ -19,30 +19,46 @@ pub async fn gatt_connect(
     app_handle: AppHandle,
     state: State<'_, super::commands::ActiveConnection<'_>>,
 ) -> Result<bool, String> {
-    let adapter = Adapter::default().await.ok_or("Failed to access the BT adapter".to_string())?;
+    let adapter = Adapter::default()
+        .await
+        .ok_or("Failed to access the BT adapter".to_string())?;
 
-    adapter.wait_available().await.map_err(|e| format!("Failed to wait for the BT adapter access: {}", e.message()))?;
+    adapter
+        .wait_available()
+        .await
+        .map_err(|e| format!("Failed to wait for the BT adapter access: {}", e.message()))?;
 
     let device_id: DeviceId = serde_json::from_str(&id).unwrap();
-    let d = adapter.open_device(&device_id).await.map_err(|e| format!("Failed to open the device: {}", e.message()))?;
+    let d = adapter
+        .open_device(&device_id)
+        .await
+        .map_err(|e| format!("Failed to open the device: {}", e.message()))?;
 
     if !d.is_connected().await {
-        adapter.connect_device(&d).await.map_err(|e| format!("Failed to connect to the device: {}", e.message()))?;
+        adapter
+            .connect_device(&d)
+            .await
+            .map_err(|e| format!("Failed to connect to the device: {}", e.message()))?;
     }
 
     let service = d
         .discover_services_with_uuid(SVC_UUID)
         .await
         .map_err(|e| format!("Failed to find the device services: {}", e.message()))?
-        .get(0)
+        .first()
         .cloned();
 
     if let Some(s) = service {
         let char = s
             .discover_characteristics_with_uuid(RPC_CHRC_UUID)
             .await
-            .map_err(|e| format!("Failed to find the studio service characteristics: {}", e.message()))?
-            .get(0)
+            .map_err(|e| {
+                format!(
+                    "Failed to find the studio service characteristics: {}",
+                    e.message()
+                )
+            })?
+            .first()
             .cloned();
 
         if let Some(c) = char {
@@ -53,7 +69,7 @@ pub async fn gatt_connect(
                     use tauri::Emitter;
 
                     while let Some(Ok(vn)) = n.next().await {
-                        ah1.emit("connection_data", vn.clone());
+                        let _ = ah1.emit("connection_data", vn.clone());
                     }
                 }
             });
@@ -95,7 +111,10 @@ pub async fn gatt_connect(
 
             Ok(true)
         } else {
-            Err("Failed to connect: Unable to locate the required studio GATT characteristic".to_string())
+            Err(
+                "Failed to connect: Unable to locate the required studio GATT characteristic"
+                    .to_string(),
+            )
         }
     } else {
         Err("Failed to connect: Unable to locate the required studio GATT service".to_string())
@@ -104,11 +123,7 @@ pub async fn gatt_connect(
 
 #[cfg(target_os = "macos")]
 async fn check_connected(adapter: &Adapter, device: &Device) -> bool {
-    if let Ok(()) = adapter.connect_device(&device).await {
-        true
-    } else {
-        false
-    }
+    adapter.connect_device(device).await.is_ok()
 }
 
 #[cfg(not(target_os = "macos"))]

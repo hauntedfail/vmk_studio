@@ -307,14 +307,39 @@ fn inspect_artifact(repo: &Path, name: &str, half: &str) -> BuiltArtifactInfo {
     }
 }
 
-fn inspect_bootloader() -> BootloaderStatus {
-    let volume_path =
-        env::var("TOUCAN_BOOT_VOLUME").unwrap_or_else(|_| "/Volumes/XIAO-BOOT".into());
-    let vol = Path::new(&volume_path);
+fn detect_uf2_central_markers(raw: &[u8]) -> (String, Vec<String>) {
+    let mut flat = Vec::with_capacity(raw.len() / 2);
+    let mut off = 0;
+    while off + 512 <= raw.len() {
+        let m0 = u32::from_le_bytes(raw[off..off + 4].try_into().unwrap());
+        let m1 = u32::from_le_bytes(raw[off + 4..off + 8].try_into().unwrap());
+        let psize = u32::from_le_bytes(raw[off + 16..off + 20].try_into().unwrap()) as usize;
+        if m0 == 0x0A324655 && m1 == 0x9E5D5157 && psize <= 476 {
+            flat.extend_from_slice(&raw[off + 32..off + 32 + psize]);
+        }
+        off += 512;
+    }
+    let mut detected_markers = Vec::new();
+    for marker in LEFT_MARKERS {
+        let needle = marker.as_bytes();
+        if flat.windows(needle.len()).any(|w| w == needle) {
+            detected_markers.push(marker.to_string());
+        }
+    }
+    let detected_half = if detected_markers.is_empty() {
+        "right_or_other".into()
+    } else {
+        "left".into()
+    };
+    (detected_half, detected_markers)
+}
+
+fn inspect_bootloader_at(volume_path: &str) -> BootloaderStatus {
+    let vol = Path::new(volume_path);
     if !vol.exists() {
         return BootloaderStatus {
             mounted: false,
-            volume_path,
+            volume_path: volume_path.to_string(),
             board_id: None,
             is_xiao_nrf52840: false,
             detected_half: "unknown".into(),
@@ -332,38 +357,25 @@ fn inspect_bootloader() -> BootloaderStatus {
     let mut detected_markers = Vec::new();
     let mut detected_half = "unknown".to_string();
     if let Ok(raw) = fs::read(vol.join("CURRENT.UF2")) {
-        let mut flat = Vec::with_capacity(raw.len() / 2);
-        let mut off = 0;
-        while off + 512 <= raw.len() {
-            let m0 = u32::from_le_bytes(raw[off..off + 4].try_into().unwrap());
-            let m1 = u32::from_le_bytes(raw[off + 4..off + 8].try_into().unwrap());
-            let psize = u32::from_le_bytes(raw[off + 16..off + 20].try_into().unwrap()) as usize;
-            if m0 == 0x0A324655 && m1 == 0x9E5D5157 && psize <= 476 {
-                flat.extend_from_slice(&raw[off + 32..off + 32 + psize]);
-            }
-            off += 512;
-        }
-        for marker in LEFT_MARKERS {
-            let needle = marker.as_bytes();
-            if flat.windows(needle.len()).any(|w| w == needle) {
-                detected_markers.push(marker.to_string());
-            }
-        }
-        detected_half = if detected_markers.is_empty() {
-            "right_or_other".into()
-        } else {
-            "left".into()
-        };
+        let (half, markers) = detect_uf2_central_markers(&raw);
+        detected_half = half;
+        detected_markers = markers;
     }
 
     BootloaderStatus {
         mounted: true,
-        volume_path,
+        volume_path: volume_path.to_string(),
         board_id,
         is_xiao_nrf52840,
         detected_half,
         detected_markers,
     }
+}
+
+fn inspect_bootloader() -> BootloaderStatus {
+    let volume_path =
+        env::var("TOUCAN_BOOT_VOLUME").unwrap_or_else(|_| "/Volumes/XIAO-BOOT".into());
+    inspect_bootloader_at(&volume_path)
 }
 
 fn list_usb_products() -> Vec<String> {
@@ -1049,13 +1061,172 @@ pub async fn vmk_cancel_job(id: String, state: State<'_, VmkJobManager>) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    fn make_temp_dir(label: &str) -> PathBuf {
+        let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = env::temp_dir().join(format!(
+            "vmk-studio-test-{}-{}-{seq}",
+            label,
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn make_synthetic_uf2(payloads: &[&[u8]]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(payloads.len() * 512);
+        for (idx, payload) in payloads.iter().enumerate() {
+            assert!(payload.len() <= 476);
+            let mut block = [0u8; 512];
+            block[0..4].copy_from_slice(&0x0A324655u32.to_le_bytes());
+            block[4..8].copy_from_slice(&0x9E5D5157u32.to_le_bytes());
+            block[8..12].copy_from_slice(&0x00002000u32.to_le_bytes());
+            block[12..16].copy_from_slice(&(0x00027000u32 + (idx as u32) * 256).to_le_bytes());
+            block[16..20].copy_from_slice(&(payload.len() as u32).to_le_bytes());
+            block[20..24].copy_from_slice(&(idx as u32).to_le_bytes());
+            block[24..28].copy_from_slice(&(payloads.len() as u32).to_le_bytes());
+            block[28..32].copy_from_slice(&0xADA52840u32.to_le_bytes());
+            block[32..32 + payload.len()].copy_from_slice(payload);
+            block[508..512].copy_from_slice(&0x0AB16F30u32.to_le_bytes());
+            out.extend_from_slice(&block);
+        }
+        out
+    }
 
     #[test]
     fn safe_join_blocks_traversal_and_git_dir() {
         let root = Path::new("/tmp/vmk-repo");
         assert!(safe_join(root, "config/toucan.keymap").is_ok());
+        assert!(safe_join(root, "./config/toucan.keymap").is_ok());
         assert!(safe_join(root, "../outside").is_err());
+        assert!(safe_join(root, "config/../../outside").is_err());
         assert!(safe_join(root, "/etc/passwd").is_err());
         assert!(safe_join(root, ".git/config").is_err());
+        assert!(safe_join(root, ".git").is_err());
+    }
+
+    #[test]
+    fn detect_uf2_central_markers_handles_split_block_boundaries() {
+        let mut block0 = [0xAAu8; 256];
+        block0[256 - 7..].copy_from_slice(b"Studio ");
+        let mut block1 = [0xBBu8; 256];
+        block1[0..6].copy_from_slice(b"Unlock");
+
+        let central = make_synthetic_uf2(&[&block0, &block1]);
+        let (half, markers) = detect_uf2_central_markers(&central);
+        assert_eq!(half, "left");
+        assert!(markers.iter().any(|m| m == "Studio Unlock"));
+
+        let peripheral = make_synthetic_uf2(&[b"toucan_right_peripheral_relay_only"]);
+        let (half, markers) = detect_uf2_central_markers(&peripheral);
+        assert_eq!(half, "right_or_other");
+        assert!(markers.is_empty());
+
+        let corrupt = vec![0xFFu8; 1024];
+        let (half, markers) = detect_uf2_central_markers(&corrupt);
+        assert_eq!(half, "right_or_other");
+        assert!(markers.is_empty());
+    }
+
+    #[test]
+    fn inspect_bootloader_at_reads_mock_xiao_volume() {
+        let dir = make_temp_dir("bootloader");
+        fs::write(
+            dir.join("INFO_UF2.TXT"),
+            "UF2 Bootloader 0.6.1\nModel: Seeed XIAO nRF52840\nBoard-ID: nRF52840-SeeedXiao\n",
+        )
+        .unwrap();
+        let uf2 = make_synthetic_uf2(&[b"prefix usbworkq suffix"]);
+        fs::write(dir.join("CURRENT.UF2"), uf2).unwrap();
+
+        let status = inspect_bootloader_at(dir.to_str().unwrap());
+        assert!(status.mounted);
+        assert!(status.is_xiao_nrf52840);
+        assert_eq!(status.board_id.as_deref(), Some("nRF52840-SeeedXiao"));
+        assert_eq!(status.detected_half, "left");
+        assert!(status.detected_markers.iter().any(|m| m == "usbworkq"));
+
+        let missing = inspect_bootloader_at(dir.join("nonexistent").to_str().unwrap());
+        assert!(!missing.mounted);
+        assert_eq!(missing.detected_half, "unknown");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn inspect_artifact_verifies_sha256_match_and_mismatch() {
+        let dir = make_temp_dir("artifact");
+        let dist = dir.join("dist");
+        fs::create_dir_all(&dist).unwrap();
+
+        let uf2_path = dist.join("toucan_right.uf2");
+        fs::write(&uf2_path, b"synthetic-uf2-payload").unwrap();
+        let expected = sha256_file(&uf2_path).unwrap();
+        fs::write(
+            dist.join("toucan_right.uf2.sha256"),
+            format!("{expected}  toucan_right.uf2\n"),
+        )
+        .unwrap();
+
+        let ok = inspect_artifact(&dir, "toucan_right", "right");
+        assert!(ok.exists);
+        assert_eq!(ok.checksum_matches, Some(true));
+
+        fs::write(
+            dist.join("toucan_right.uf2.sha256"),
+            format!("{}  toucan_right.uf2\n", "0".repeat(64)),
+        )
+        .unwrap();
+        let bad = inspect_artifact(&dir, "toucan_right", "right");
+        assert_eq!(bad.checksum_matches, Some(false));
+
+        let missing = inspect_artifact(&dir, "toucan_left_zg_studio", "left");
+        assert!(!missing.exists);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_save_list_and_read_round_trip() {
+        let dir = make_temp_dir("snapshots");
+        fs::write(
+            dir.join("flash-record.json"),
+            r#"{"status":"timeout_no_bootloader"}"#,
+        )
+        .unwrap();
+
+        let snapshot = serde_json::json!({
+            "device": "Toucan 2",
+            "keymap_sha256": "abc123",
+            "note": "pre-release",
+            "layers": [{"id": 0, "name": "BASE", "bindings": []}]
+        });
+
+        let summary = tauri::async_runtime::block_on(vmk_save_snapshot(
+            dir.to_string_lossy().into_owned(),
+            "first release!".into(),
+            snapshot,
+        ))
+        .unwrap();
+        assert!(summary.name.contains("first_release_"));
+        assert_eq!(summary.layer_count, 1);
+
+        let listed =
+            tauri::async_runtime::block_on(vmk_list_snapshots(dir.to_string_lossy().into_owned()))
+                .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].device.as_deref(), Some("Toucan 2"));
+
+        let loaded = tauri::async_runtime::block_on(vmk_read_snapshot(
+            dir.to_string_lossy().into_owned(),
+            summary.rel_path,
+        ))
+        .unwrap();
+        assert_eq!(loaded["note"], "pre-release");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

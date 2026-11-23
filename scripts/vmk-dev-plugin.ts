@@ -1,5 +1,4 @@
 import type { Plugin, ViteDevServer } from "vite";
-import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -111,7 +110,7 @@ function mergePaths(partial?: Partial<VmkWorkspacePaths>): VmkWorkspacePaths {
   };
 }
 
-function assertInside(rootDir: string, relPath: string): string {
+export function assertInside(rootDir: string, relPath: string): string {
   const resolvedRoot = path.resolve(rootDir);
   const resolved = path.resolve(resolvedRoot, relPath);
   if (
@@ -141,7 +140,7 @@ async function sha256File(p: string): Promise<string> {
   return crypto.createHash("sha256").update(buf).digest("hex");
 }
 
-async function inspectArtifact(
+export async function inspectArtifact(
   repoPath: string,
   name: string,
   half: "left" | "right"
@@ -172,8 +171,34 @@ async function inspectArtifact(
   };
 }
 
-async function inspectBootloader(): Promise<BootloaderStatus> {
-  const volumePath = process.env.TOUCAN_BOOT_VOLUME || "/Volumes/XIAO-BOOT";
+export function scanUf2CentralMarkers(raw: Buffer): {
+  detectedHalf: BootloaderStatus["detectedHalf"];
+  detectedMarkers: string[];
+} {
+  // Extract UF2 payloads to match strings cleanly across block boundaries
+  const chunks: Buffer[] = [];
+  for (let off = 0; off + 512 <= raw.length; off += 512) {
+    const m0 = raw.readUInt32LE(off);
+    const m1 = raw.readUInt32LE(off + 4);
+    const payloadSize = raw.readUInt32LE(off + 16);
+    if (m0 === 0x0a324655 && m1 === 0x9e5d5157 && payloadSize <= 476) {
+      chunks.push(raw.subarray(off + 32, off + 32 + payloadSize));
+    }
+  }
+  const flat = Buffer.concat(chunks);
+  const detectedMarkers: string[] = [];
+  for (const marker of LEFT_MARKERS) {
+    if (flat.includes(Buffer.from(marker, "utf8"))) {
+      detectedMarkers.push(marker);
+    }
+  }
+  return {
+    detectedHalf: detectedMarkers.length > 0 ? "left" : "right_or_other",
+    detectedMarkers,
+  };
+}
+
+export async function inspectBootloaderAt(volumePath: string): Promise<BootloaderStatus> {
   const mounted = await fileExists(volumePath);
   if (!mounted) {
     return {
@@ -199,29 +224,15 @@ async function inspectBootloader(): Promise<BootloaderStatus> {
     }
   }
 
-  const detectedMarkers: string[] = [];
+  let detectedMarkers: string[] = [];
   let detectedHalf: BootloaderStatus["detectedHalf"] = "unknown";
   const currentUf2 = path.join(volumePath, "CURRENT.UF2");
   if (await fileExists(currentUf2)) {
     try {
       const raw = await fsp.readFile(currentUf2);
-      // Extract UF2 256-byte payloads to match strings cleanly across block boundaries
-      const chunks: Buffer[] = [];
-      for (let off = 0; off + 512 <= raw.length; off += 512) {
-        const m0 = raw.readUInt32LE(off);
-        const m1 = raw.readUInt32LE(off + 4);
-        const payloadSize = raw.readUInt32LE(off + 16);
-        if (m0 === 0x0a324655 && m1 === 0x9e5d5157 && payloadSize <= 476) {
-          chunks.push(raw.subarray(off + 32, off + 32 + payloadSize));
-        }
-      }
-      const flat = Buffer.concat(chunks);
-      for (const marker of LEFT_MARKERS) {
-        if (flat.includes(Buffer.from(marker, "utf8"))) {
-          detectedMarkers.push(marker);
-        }
-      }
-      detectedHalf = detectedMarkers.length > 0 ? "left" : "right_or_other";
+      const scanned = scanUf2CentralMarkers(raw);
+      detectedMarkers = scanned.detectedMarkers;
+      detectedHalf = scanned.detectedHalf;
     } catch {
       detectedHalf = "unknown";
     }
@@ -235,6 +246,11 @@ async function inspectBootloader(): Promise<BootloaderStatus> {
     detectedHalf,
     detectedMarkers,
   };
+}
+
+async function inspectBootloader(): Promise<BootloaderStatus> {
+  const volumePath = process.env.TOUCAN_BOOT_VOLUME || "/Volumes/XIAO-BOOT";
+  return inspectBootloaderAt(volumePath);
 }
 
 async function listUsbProducts(): Promise<string[]> {
@@ -356,7 +372,7 @@ async function readTextIfExists(p: string): Promise<string> {
   }
 }
 
-async function readFirmwareModel(repoPath: string): Promise<FirmwareModel> {
+export async function readFirmwareModel(repoPath: string): Promise<FirmwareModel> {
   const keymapContent = await readTextIfExists(path.join(repoPath, "config/toucan.keymap"));
   const leftOverlay = await readTextIfExists(
     path.join(repoPath, "boards/shields/toucan/toucan_left.overlay")
@@ -445,7 +461,7 @@ async function readFirmwareModel(repoPath: string): Promise<FirmwareModel> {
   };
 }
 
-async function applyFirmwarePatch(
+export async function applyFirmwarePatch(
   repoPath: string,
   patch: FirmwareTuningPatch
 ): Promise<{ changedFiles: string[]; model: FirmwareModel }> {
@@ -551,7 +567,7 @@ async function applyFirmwarePatch(
   return { changedFiles, model: await readFirmwareModel(repoPath) };
 }
 
-async function listSnapshots(backupsDir: string): Promise<SnapshotSummary[]> {
+export async function listSnapshots(backupsDir: string): Promise<SnapshotSummary[]> {
   if (!(await fileExists(backupsDir))) return [];
   const results: SnapshotSummary[] = [];
 
@@ -590,7 +606,7 @@ async function listSnapshots(backupsDir: string): Promise<SnapshotSummary[]> {
   return results.sort((a, b) => b.mtimeIso.localeCompare(a.mtimeIso));
 }
 
-async function saveSnapshot(
+export async function saveSnapshot(
   backupsDir: string,
   name: string,
   snapshot: StudioSnapshot

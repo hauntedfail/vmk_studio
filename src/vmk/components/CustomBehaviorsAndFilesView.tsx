@@ -189,7 +189,7 @@ export const CustomBehaviorsAndFilesView = ({
     }
   }, [firmwareModel, isDirty, selectedRelPath, content, onRefreshModel]);
 
-  const handleSaveBehavior = async () => {
+  const handleSaveBehavior = useCallback(async () => {
     if (!firmwareModel || !editingBehavior) return;
     setSaving(true);
     try {
@@ -210,7 +210,7 @@ export const CustomBehaviorsAndFilesView = ({
     } finally {
       setSaving(false);
     }
-  };
+  }, [firmwareModel, editingBehavior, onModelUpdated, loadFile]);
 
   const handleDeleteBehavior = async (b: CustomBehaviorDef) => {
     if (!firmwareModel) return;
@@ -274,7 +274,7 @@ export const CustomBehaviorsAndFilesView = ({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleSaveFile, rightMode, editingBehavior]);
+  }, [handleSaveFile, handleSaveBehavior, rightMode]);
 
   if (!firmwareModel) {
     return (

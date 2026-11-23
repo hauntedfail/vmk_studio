@@ -312,8 +312,14 @@ export const VisualRepoKeymapEditor = ({
     );
   }, [layers, conditionalLayers, combos, firmwareModel]);
 
-  const layoutKeys = firmwareModel?.physicalLayout || [];
-  const customBehaviorDefs = firmwareModel?.customBehaviors || [];
+  const layoutKeys = useMemo(
+    () => firmwareModel?.physicalLayout ?? [],
+    [firmwareModel?.physicalLayout]
+  );
+  const customBehaviorDefs = useMemo(
+    () => firmwareModel?.customBehaviors ?? [],
+    [firmwareModel?.customBehaviors]
+  );
   const customLabelSet = useMemo(
     () => new Set(customBehaviorDefs.map((b) => `&${b.label}`)),
     [customBehaviorDefs]

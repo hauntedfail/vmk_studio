@@ -13,7 +13,7 @@
   "bundle": {
     "active": true,
     "category": "Productivity",
-    "copyright": "",
+    "copyright": "Copyright VMK Studio Contributors and The ZMK Contributors",
     "linux": {
       "deb": {
         "depends": []
@@ -27,7 +27,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "longDescription": "",
+    "longDescription": "Custom-firmware-aware fork of ZMK Studio with visual keymap editing, devicetree firmware tuning, custom behaviour protection, and half-guarded UF2 flashing.",
     "macOS": {
       "entitlements": null,
       "exceptionDomain": "",
@@ -36,11 +36,9 @@
       "signingIdentity": "-"
     },
     "resources": [],
-    "shortDescription": "",
+    "shortDescription": "Custom-firmware-aware ZMK Studio fork",
     "targets": "all",
-    "windows": {
-      "signCommand": "signtool.exe sign /v /debug /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib ..\\Microsoft.Trusted.Signing.Client\\bin\\x64\\Azure.CodeSigning.Dlib.dll /dmdf trusted-signing-metadata.json %1"
-    }
+    "windows": {}
   },
   "plugins": {
     "cli": {

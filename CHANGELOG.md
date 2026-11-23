@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0] (2026-11-24)
+
+First release of **VMK Studio**, forked from ZMK Studio `v0.3.1` for custom firmware workflows (including beekeeb Toucan 2).
+
+### Features
+
+* **Custom Overwrite Guard & Live Keymap Safety**: Detects custom firmware behaviours (from `dts/*.dtsi` and non-stock Studio behaviours) plus safety keys (`Studio Unlock`, `Bootloader`, `Reset`) and locks them against accidental overwrite until explicitly unlocked per key. Adds 2-parameter Hold-Tap labels, implicit HID modifier rendering, unsigned 32-bit `RightGUI` modifier handling, a Raw Binding Inspector, live snapshots with diff and selective restore, and a `RESET`-gated `Restore Stock Settings` safeguard.
+* **Visual Repository Keymap Editor**: Visually edits `config/toucan.keymap` layers, Combos, and Conditional Layers with Undo/Redo and comment-preserving 12+12+12+6 DTS output, plus offline Studio snapshot inspection.
+* **Fine-Grained Custom Firmware & Helper Tuner**: Comment-preserving controls for `toucan_left.overlay` feature gates, `src/cg_zoom.c` / `src/cg_nav.c` chords and markers, `&mt`/`&lt` Hold-Tap timing, `toucan.dtsi` input processors and swipes, `toucan_right.overlay` Azoteq TPS43 settings, `toucan_left.conf`/`toucan_right.conf` + `Kconfig`, and `host/macos/Sources/Core/ZoomSmoother.swift`.
+* **Custom Behaviours CRUD & Source Editor**: Create, edit, and remove custom DTS behaviours in `dts/cg_toggle.dtsi` and edit repository firmware files with live `git diff` and per-file revert.
+* **Build, Test & Half-Guarded Flash Pipeline**: Dual backend (Vite local middleware and Tauri v2 Rust commands) for running host tests, building firmware with `west`, verifying SHA-256 checksums, rebuilding the macOS helper, and flashing Left/Right UF2 images with `CURRENT.UF2` central-marker cross-flash detection.
+* **Rare UI Redesign**: Monochrome neutral palette with `#FC4C01` accent, sculpted keycaps, dark/light theme switcher, and `GooeyNav`, `ThemeSelector`, `CodeBlock`, `DeleteButton`, and toast primitives from Rare UI.
+* **CI & Safe Release Pipeline**: GitHub Actions CI for frontend (version sync, type-check, ESLint, Vitest, build, preview smoke test) and Rust/Tauri (`cargo fmt`, strict `clippy -D warnings`, unit tests on macOS and Linux), plus a gated tag-triggered workflow that builds desktop bundles and creates a Draft GitHub Release with `SHA256SUMS.txt`.
+
 ## [0.3.1](https://github.com/zmkfirmware/zmk-studio/compare/v0.3.0...v0.3.1) (2025-01-20)
 
 

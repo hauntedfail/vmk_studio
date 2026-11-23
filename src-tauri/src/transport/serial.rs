@@ -29,13 +29,13 @@ pub async fn serial_connect(
             *state.conn.lock().await = Some(Box::new(send));
 
             let read_process = tauri::async_runtime::spawn(async move {
-                use tauri::Manager;
                 use tauri::Emitter;
+                use tauri::Manager;
 
                 let mut buffer = vec![0; READ_BUF_SIZE];
                 while let Ok(size) = reader.read(&mut buffer).await {
                     if size > 0 {
-                        app_handle.emit("connection_data", &buffer[..size]);
+                        let _ = app_handle.emit("connection_data", &buffer[..size]);
                     } else {
                         break;
                     }
@@ -44,7 +44,7 @@ pub async fn serial_connect(
                 let state = app_handle.state::<super::commands::ActiveConnection>();
                 *state.conn.lock().await = None;
 
-                app_handle.emit("connection_disconnected", ());
+                let _ = app_handle.emit("connection_disconnected", ());
             });
 
             tauri::async_runtime::spawn(async move {
@@ -61,15 +61,15 @@ pub async fn serial_connect(
 
             Ok(true)
         }
-        Err(e) => {
-            Err(format!("Failed to open the serial port: {}", e.description))
-        }
+        Err(e) => Err(format!("Failed to open the serial port: {}", e.description)),
     }
 }
 
 #[command]
-pub async fn serial_list_devices(app_handle: AppHandle) -> Result<Vec<super::commands::AvailableDevice>, ()> {
-    let ports = unblock(|| available_ports()).await.unwrap();
+pub async fn serial_list_devices(
+    app_handle: AppHandle,
+) -> Result<Vec<super::commands::AvailableDevice>, ()> {
+    let ports = unblock(available_ports).await.unwrap();
 
     let mut candidates = ports
         .into_iter()
@@ -85,18 +85,15 @@ pub async fn serial_list_devices(app_handle: AppHandle) -> Result<Vec<super::com
         })
         .collect::<Vec<_>>();
 
-    match app_handle.cli().matches() {
-        Ok(m) => {
-            if let Some(p) = m.args.get("serial-port") {
-                if let serde_json::Value::String(path) = &p.value {
-                    candidates.push(super::commands::AvailableDevice {
-                        id: path.to_string(),
-                        label: format!("CLI Port: {path}").to_string(),
-                    })
-                }
+    if let Ok(m) = app_handle.cli().matches() {
+        if let Some(p) = m.args.get("serial-port") {
+            if let serde_json::Value::String(path) = &p.value {
+                candidates.push(super::commands::AvailableDevice {
+                    id: path.to_string(),
+                    label: format!("CLI Port: {path}"),
+                })
             }
-        },
-        Err(_) => {},
+        }
     }
 
     Ok(candidates)

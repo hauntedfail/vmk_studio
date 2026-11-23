@@ -7,11 +7,9 @@ use futures::channel::mpsc::SendError;
 use serde::{Deserialize, Serialize};
 
 use tauri::ipc::InvokeBody;
-use tauri::{
-    command,
-    ipc::{Request},
-    State,
-};
+use tauri::{command, ipc::Request, State};
+
+type ActiveSink<'a> = Box<dyn Sink<Vec<u8>, Error = SendError> + Unpin + Send + 'a>;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AvailableDevice {
@@ -21,7 +19,7 @@ pub struct AvailableDevice {
 
 #[derive(Debug, Default)]
 pub struct ActiveConnection<'a> {
-    pub conn: Mutex<Option<Box<dyn Sink<Vec<u8>, Error = SendError> + Unpin + Send + 'a>>>,
+    pub conn: Mutex<Option<ActiveSink<'a>>>,
 }
 
 #[command]
@@ -33,7 +31,7 @@ pub async fn transport_send_data(
         let mut lock = state.conn.lock().await;
 
         let sink = lock.as_mut().unwrap();
-        sink.send(data.clone()).await;
+        let _ = sink.send(data.clone()).await;
     }
 
     Ok(())
@@ -41,7 +39,7 @@ pub async fn transport_send_data(
 
 #[command]
 pub async fn transport_close(
-    req: Request<'_>,
+    _req: Request<'_>,
     state: State<'_, ActiveConnection<'_>>,
 ) -> Result<(), ()> {
     *state.conn.lock().await = None;

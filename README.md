@@ -21,12 +21,21 @@ A custom-firmware-aware fork of [ZMK Studio](https://github.com/zmkfirmware/zmk-
 
 ```sh
 npm install
-npm test          # Run unit tests (Vitest)
-npm run dev       # Start web UI + local VMK firmware/build/flash API bridge
-npm run build     # Type-check and build production frontend
-npm run tauri dev # Run native macOS Tauri desktop app
+npm run typecheck     # Type-check app and Node plugin scripts
+npm run lint:vmk      # Strict ESLint check on VMK Studio modules
+npm test              # Run unit and safety tests (Vitest)
+npm run dev           # Start web UI + local VMK firmware/build/flash API bridge
+npm run build         # Type-check and build production frontend
+npm run smoke         # Smoke-test built dist/ bundle via vite preview
+npm run check:release # Run all local frontend + Rust pre-release gates
+npm run tauri dev     # Run native macOS Tauri desktop app
 ```
+
+## CI & Releases
+
+- `.github/workflows/ci.yml` verifies version sync, TypeScript types, ESLint, Vitest, production bundle build/smoke test, and Rust `fmt` / strict `clippy -D warnings` / unit tests on both macOS and Ubuntu 24.04.
+- `.github/workflows/release.yml` runs on `v*.*.*` tags (or manually with `dry_run=true`), gates builds on all checks, packages Tauri desktop installers with `SHA256SUMS.txt`, and creates a **Draft GitHub Release** for manual review. See [RELEASING.md](RELEASING.md).
 
 ## Licensing
 
-Apache-2.0, preserving upstream ZMK Studio's `LICENSE` and `NOTICE`.
+Apache-2.0, preserving upstream ZMK Studio's `LICENSE` and `NOTICE`. UI primitives adapted from [Rare UI](https://www.rareui.com) are credited in `NOTICE` and the application footer.
