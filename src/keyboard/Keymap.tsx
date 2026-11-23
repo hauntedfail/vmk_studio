@@ -8,14 +8,11 @@ import {
   LayoutZoom,
   PhysicalLayout as PhysicalLayoutComp,
 } from "./PhysicalLayout";
-import { HidUsageLabel } from "./HidUsageLabel";
 import type { CustomBehaviorDef } from "../vmk/types";
 import type { ToucanHardwareOverlayProps } from "../vmk/components/ToucanHardwareModules";
-import {
-  classifyBehavior,
-  formatHex,
-  formatShortBindingSummary,
-} from "../vmk/customBehaviors";
+import { classifyBehavior, formatHex } from "../vmk/customBehaviors";
+import { resolveStudioBindingLegend } from "../vmk/keycapLegendModel";
+import { KeycapLegend } from "../vmk/components/KeycapLegend";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -70,11 +67,12 @@ export const Keymap = ({
     const binding = layer.bindings[i];
     const behavior = behaviors[binding.behaviorId];
     const cls = classifyBehavior(behavior, customBehaviors);
-    const summary = formatShortBindingSummary(binding, behaviors, layerSummaries);
-    const isStandardKeyPress =
-      behavior?.displayName === "Key Press" ||
-      behavior?.displayName === "Sticky Key" ||
-      behavior?.displayName === "Key Toggle";
+    const spec = resolveStudioBindingLegend(
+      behavior?.displayName,
+      binding.param1,
+      binding.param2,
+      layerSummaries
+    );
 
     const tooltipParts = [
       `Key #${i}: ${cls.label} (id=${binding.behaviorId})`,
@@ -86,8 +84,8 @@ export const Keymap = ({
 
     return {
       id: `${layer.id}-${i}`,
-      header: summary.header,
-      secondaryLabel: summary.secondary,
+      header: spec.header,
+      secondaryLabel: spec.secondaryLabel,
       badgeKind: cls.kind,
       isDiff: diffPositions?.has(i) ?? false,
       tooltip: tooltipParts.join("\n"),
@@ -98,13 +96,7 @@ export const Keymap = ({
       r: (k.r || 0) / 100.0,
       rx: (k.rx || 0) / 100.0,
       ry: (k.ry || 0) / 100.0,
-      children: isStandardKeyPress ? (
-        <HidUsageLabel hid_usage={binding.param1} />
-      ) : (
-        <span className="text-[0.65rem] font-medium text-center leading-tight line-clamp-2 break-words">
-          {summary.primary}
-        </span>
-      ),
+      children: <KeycapLegend spec={spec} />,
     };
   });
 

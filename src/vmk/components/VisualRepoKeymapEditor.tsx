@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { PhysicalLayout, KeyPosition } from "../../keyboard/PhysicalLayout";
-import { formatHex, formatHidUsageShort } from "../customBehaviors";
+import { formatHex } from "../customBehaviors";
 import {
   formatDtsBindingExpr,
   parseDtsBindingExpr,
@@ -9,10 +9,14 @@ import {
   ALL_ZMK_KEYCODES,
   ZMK_KEYCODE_GROUPS,
   ZMK_MOD_WRAPPERS,
-  formatZmkKeycapLegend,
   unwrapZmkMods,
   wrapZmkMods,
 } from "../zmkKeycodes";
+import {
+  resolveDtsBindingLegend,
+  resolveStudioBindingLegend,
+} from "../keycapLegendModel";
+import { KeycapLegend } from "./KeycapLegend";
 import type {
   ComboDef,
   ConditionalLayerRule,
@@ -489,12 +493,22 @@ export const VisualRepoKeymapEditor = ({
 
     if (viewMode === "snapshot" && loadedSnapshot) {
       const layer = loadedSnapshot.layers[selectedLayerIdx];
+      const snapLayerSummaries = loadedSnapshot.layers.map((l, i) => ({
+        id: l.id,
+        name: l.name || `L${i}`,
+      }));
       return layoutKeys.map((k, idx) => {
         const b = layer?.bindings[idx];
         const bMeta = b ? loadedSnapshot.behaviors?.[b.behavior_id] : undefined;
-        const p1Label = b && b.param1 ? formatHidUsageShort(b.param1) : "";
-        const p2Label = b && b.param2 ? formatHidUsageShort(b.param2) : "";
-        const displayName = bMeta?.displayName || (b ? `B#${b.behavior_id}` : "—");
+        const displayName = bMeta?.displayName;
+        const spec = b
+          ? resolveStudioBindingLegend(
+              displayName,
+              b.param1 ?? 0,
+              b.param2 ?? 0,
+              snapLayerSummaries
+            )
+          : { kind: "muted" as const, text: "—" };
         const isCustom =
           bMeta &&
           customBehaviorDefs.some(
@@ -510,17 +524,13 @@ export const VisualRepoKeymapEditor = ({
           r: k.r ?? 0,
           rx: k.rx ?? k.x,
           ry: k.ry ?? k.y,
-          header: p1Label ? displayName : undefined,
-          secondaryLabel: p2Label || undefined,
+          header: spec.header,
+          secondaryLabel: spec.secondaryLabel,
           badgeKind: isCustom ? "custom" : "stock",
           tooltip: b
-            ? `Pos #${idx}\n${displayName} (id=${b.behavior_id})\np1=${formatHex(b.param1)} p2=${formatHex(b.param2)}`
+            ? `Pos #${idx}\n${displayName || `B#${b.behavior_id}`} (id=${b.behavior_id})\np1=${formatHex(b.param1)} p2=${formatHex(b.param2)}`
             : `Pos #${idx}`,
-          children: (
-            <span className="text-[11px] font-medium text-center leading-tight px-0.5 truncate max-w-full">
-              {p1Label || displayName}
-            </span>
-          ),
+          children: <KeycapLegend spec={spec} />,
         };
       });
     }
@@ -536,67 +546,12 @@ export const VisualRepoKeymapEditor = ({
         parsed.behavior === "&bootloader" ||
         parsed.behavior === "&sys_reset";
 
-      let primary = parsed.behavior.replace(/^&/, "");
-      let header: string | undefined;
-      let secondaryLabel: string | undefined;
-
-      if (activeLayer?.reserved) {
-        primary = "—";
-      } else if (parsed.behavior === "&trans") {
-        primary = "▽";
-      } else if (parsed.behavior === "&none") {
-        primary = "·";
-      } else if (parsed.behavior === "&studio_unlock") {
-        primary = "Unlock";
-      } else if (parsed.behavior === "&bootloader") {
-        primary = "Boot";
-      } else if (parsed.behavior === "&sys_reset") {
-        primary = "Reset";
-      } else if (parsed.behavior === "&kp") {
-        primary = formatZmkKeycapLegend(parsed.params.join(" ")) || "?";
-      } else if (parsed.behavior === "&mt") {
-        header = "MT";
-        primary = formatZmkKeycapLegend(parsed.params[1] || "?");
-        secondaryLabel = parsed.params[0]
-          ? formatZmkKeycapLegend(parsed.params[0])
-          : undefined;
-      } else if (parsed.behavior === "&lt") {
-        const lIdx = parseInt(parsed.params[0] || "0", 10);
-        const lName = layers[lIdx]?.displayName || `L${parsed.params[0] ?? 0}`;
-        header = lName;
-        primary = formatZmkKeycapLegend(parsed.params[1] || "?");
-      } else if (["&mo", "&to", "&tog", "&sl"].includes(parsed.behavior)) {
-        const lIdx = parseInt(parsed.params[0] || "0", 10);
-        header = parsed.behavior.slice(1).toUpperCase();
-        primary = layers[lIdx]?.displayName || parsed.params[0] || "?";
-      } else if (parsed.behavior === "&bt") {
-        header = "BT";
-        if (parsed.params[0] === "BT_SEL") {
-          primary = parsed.params[1] ?? "0";
-        } else if (parsed.params[0] === "BT_CLR") {
-          primary = "CLR";
-        } else {
-          primary = (parsed.params[0] || "").replace(/^BT_/, "");
-        }
-      } else if (parsed.behavior === "&mkp") {
-        header = "M";
-        primary = (parsed.params[0] || "").replace(/CLK$/, "");
-      } else if (parsed.params.length > 0) {
-        header = parsed.behavior.slice(1).toUpperCase();
-        primary = parsed.params.join(" ");
-      } else if (isCustom) {
-        const def = customBehaviorDefs.find((d) => `&${d.label}` === parsed.behavior);
-        primary = def?.displayName || parsed.behavior.slice(1);
-      }
-
-      const len = Array.from(primary).length;
-      const legendSizeClass =
-        len <= 1
-          ? "text-[13px] font-medium"
-          : len <= 3
-            ? "text-[10.5px] font-medium tracking-wide"
-            : "text-[9.5px] font-medium tracking-normal";
-      const mutedGlyph = parsed.behavior === "&trans" || parsed.behavior === "&none";
+      const spec = resolveDtsBindingLegend(
+        bindingStr,
+        layers,
+        customBehaviorDefs,
+        Boolean(activeLayer?.reserved)
+      );
 
       return {
         id: `repo-${selectedLayerIdx}-${idx}`,
@@ -607,20 +562,12 @@ export const VisualRepoKeymapEditor = ({
         r: k.r ?? 0,
         rx: k.rx ?? k.x,
         ry: k.ry ?? k.y,
-        header,
-        secondaryLabel,
+        header: spec.header,
+        secondaryLabel: spec.secondaryLabel,
         badgeKind: isCustom ? "custom" : isSafety ? "safety" : "stock",
         isDiff: highlightedComboPositions.has(idx),
         tooltip: `Pos #${idx}: ${bindingStr}`,
-        children: (
-          <span
-            className={`${legendSizeClass} ${
-              mutedGlyph ? "opacity-45" : ""
-            } text-center leading-none max-w-full truncate`}
-          >
-            {primary}
-          </span>
-        ),
+        children: <KeycapLegend spec={spec} />,
       };
     });
   }, [

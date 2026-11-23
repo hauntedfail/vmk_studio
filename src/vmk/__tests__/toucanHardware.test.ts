@@ -12,6 +12,11 @@ import {
 } from "../toucanLayout";
 import { parseKeymapLayers } from "../dtsParser";
 import { formatZmkKeycapLegend } from "../zmkKeycodes";
+import {
+  resolveDtsBindingLegend,
+  resolveHidUsageLegend,
+  resolveStudioBindingLegend,
+} from "../keycapLegendModel";
 import type { RepoKeymapLayer } from "../types";
 
 describe("Toucan 2 endpoint swap audit & hardware canvas detection", () => {
@@ -170,5 +175,44 @@ describe("Toucan 2 endpoint swap audit & hardware canvas detection", () => {
     expect(formatZmkKeycapLegend("N5")).toBe("5");
     expect(formatZmkKeycapLegend("LC(LG(UP))")).toBe("⌃⌘↑");
     expect(formatZmkKeycapLegend("LG(EQUAL)")).toBe("⌘=");
+  });
+
+  it("unifies DTS, Studio, and HID keycap legends across all key types", () => {
+    const layers = [{ displayName: "BASE" }, { displayName: "NAV" }, { displayName: "SYM" }];
+    expect(resolveDtsBindingLegend("&mo 1", layers, [])).toEqual({
+      kind: "glyph",
+      text: "NAV",
+      header: undefined,
+    });
+    expect(resolveDtsBindingLegend("&studio_unlock", layers, [])).toEqual({
+      kind: "icon",
+      icon: "unlock",
+    });
+    expect(resolveDtsBindingLegend("&kp C_VOL_UP", layers, [])).toEqual({
+      kind: "icon",
+      icon: "vol-up",
+      header: undefined,
+    });
+    expect(resolveDtsBindingLegend("&bt BT_SEL 1", layers, [])).toEqual({
+      kind: "icon",
+      icon: "bt",
+      sub: "1",
+    });
+    expect(resolveDtsBindingLegend("&cg_toggle", layers, [])).toEqual({
+      kind: "icon",
+      icon: "cg-swap",
+      sub: "CG",
+    });
+
+    // HID usages (Snapshots & Live RPC) produce the exact same symbols/icons
+    expect(resolveHidUsageLegend(0x070036)).toEqual({ kind: "glyph", text: "," });
+    expect(resolveHidUsageLegend(0x0207001e)).toEqual({ kind: "glyph", text: "!" });
+    expect(resolveHidUsageLegend(0x0c00e9)).toEqual({ kind: "icon", icon: "vol-up" });
+    expect(
+      resolveStudioBindingLegend("Mod-Tap", 0x0700e3, 0x07002b, [{ id: 0, name: "0" }])
+    ).toEqual({ kind: "glyph", text: "⇥", secondaryLabel: "⌘" });
+    expect(
+      resolveStudioBindingLegend("Toggle Ctrl GUI", 0, 0, [{ id: 0, name: "0" }])
+    ).toEqual({ kind: "icon", icon: "cg-swap", sub: "CG" });
   });
 });
