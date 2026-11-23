@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { RpcTransport } from "@zmkfirmware/zmk-studio-ts-client/transport/index";
 import { UserCancelledError } from "@zmkfirmware/zmk-studio-ts-client/transport/errors";
 import type { AvailableDevice } from "./tauri/index";
-import { Bluetooth, RefreshCw } from "lucide-react";
+import { Bluetooth, RefreshCw, X } from "lucide-react";
 import { Key, ListBox, ListBoxItem, Selection } from "react-aria-components";
 import { useModalRef } from "./misc/useModalRef";
 import { ExternalLink } from "./misc/ExternalLink";
@@ -23,6 +23,7 @@ export interface ConnectModalProps {
   open?: boolean;
   transports: TransportFactory[];
   onTransportCreated: (t: RpcTransport) => void;
+  onDismiss?: () => void;
 }
 
 function deviceList(
@@ -38,17 +39,15 @@ function deviceList(
 
   async function LoadEm() {
     setRefreshing(true);
-    let entries: Array<[TransportFactory, AvailableDevice]> = [];
+    const entries: Array<[TransportFactory, AvailableDevice]> = [];
     for (const t of transports.filter((t) => t.pick_and_connect)) {
-      const devices = await t.pick_and_connect?.list();
-      if (!devices) {
+      const found = await t.pick_and_connect?.list();
+      if (!found) {
         continue;
       }
 
       entries.push(
-        ...devices.map<[TransportFactory, AvailableDevice]>((d) => {
-          return [t, d];
-        })
+        ...found.map<[TransportFactory, AvailableDevice]>((d) => [t, d])
       );
     }
 
@@ -60,7 +59,9 @@ function deviceList(
     setSelectedDev(new Set());
     setDevices([]);
 
-    LoadEm();
+    if (open) {
+      LoadEm();
+    }
   }, [transports, open, setDevices]);
 
   const onRefresh = useCallback(() => {
@@ -87,16 +88,17 @@ function deviceList(
   );
 
   return (
-    <div>
-      <div className="grid grid-cols-[1fr_auto]">
-        <label>Select A Device:</label>
+    <div className="space-y-2">
+      <div className="grid grid-cols-[1fr_auto] items-center">
+        <label className="text-sm font-medium">Select a Keyboard:</label>
         <button
+          type="button"
           className="p-1 rounded hover:bg-base-300 disabled:bg-base-100 disabled:opacity-75"
           disabled={refreshing}
           onClick={onRefresh}
         >
           <RefreshCw
-            className={`size-5 transition-transform ${
+            className={`size-4 transition-transform ${
               refreshing ? "animate-spin" : ""
             }`}
           />
@@ -108,21 +110,26 @@ function deviceList(
         onSelectionChange={onSelect}
         selectionMode="single"
         selectedKeys={selectedDev}
-        className="flex flex-col gap-1 pt-1"
+        className="flex flex-col gap-1 pt-1 max-h-48 overflow-y-auto"
       >
         {([t, d]) => (
           <ListBoxItem
-            className="grid grid-cols-[1em_1fr] rounded hover:bg-base-300 cursor-pointer px-1"
+            className="grid grid-cols-[1.25em_1fr] items-center rounded bg-base-200 hover:bg-base-300 cursor-pointer px-2 py-1.5 text-sm"
             id={d.id}
             aria-label={d.label}
           >
             {t.isWireless && (
-              <Bluetooth className="w-4 justify-center content-center h-full" />
+              <Bluetooth className="w-4 h-4 text-sky-400" />
             )}
             <span className="col-start-2">{d.label}</span>
           </ListBoxItem>
         )}
       </ListBox>
+      {devices.length === 0 && !refreshing && (
+        <p className="text-xs opacity-65">
+          No USB/BLE Studio devices detected. Plug in the left half over USB or continue in offline mode.
+        </p>
+      )}
     </div>
   );
 }
@@ -186,27 +193,28 @@ function simpleDevicePicker(
     };
   }, [selectedTransport]);
 
-  let connections = transports.map((t) => (
+  const connections = transports.map((t) => (
     <li key={t.label} className="list-none">
       <button
-        className="bg-base-300 hover:bg-primary hover:text-primary-content rounded px-2 py-1"
+        className="bg-primary text-primary-content hover:opacity-90 rounded px-3 py-1.5 text-sm font-medium"
         type="button"
         onClick={async () => setSelectedTransport(t)}
       >
-        {t.label}
+        Connect via {t.label}
       </button>
     </li>
   ));
+
   return (
-    <div>
-      <p className="text-sm">Select a connection type.</p>
-      <ul className="flex gap-2 pt-2">{connections}</ul>
+    <div className="space-y-2">
+      <p className="text-sm opacity-80">Select a connection type for live ZMK Studio RPC:</p>
+      <ul className="flex gap-2 pt-1">{connections}</ul>
       {selectedTransport && availableDevices && (
-        <ul>
+        <ul className="space-y-1">
           {availableDevices.map((d) => (
             <li
               key={d.id}
-              className="m-1 p-1"
+              className="p-1.5 rounded bg-base-200 hover:bg-base-300 cursor-pointer text-sm"
               onClick={async () => {
                 onTransportCreated(
                   await selectedTransport!.pick_and_connect!.connect(d)
@@ -225,35 +233,17 @@ function simpleDevicePicker(
 
 function noTransportsOptionsPrompt() {
   return (
-    <div className="m-4 flex flex-col gap-2">
+    <div className="my-2 flex flex-col gap-2 text-sm">
       <p>
-        Your browser is not supported. ZMK Studio uses either{" "}
+        Live USB/BLE connection requires either{" "}
         <ExternalLink href="https://caniuse.com/web-serial">
           Web Serial
         </ExternalLink>{" "}
-        or{" "}
-        <ExternalLink href="https://caniuse.com/web-bluetooth">
-          Web Bluetooth
-        </ExternalLink>{" "}
-        (Linux only) to connect to ZMK devices.
+        (Chrome/Edge) or the VMK Studio Tauri desktop app.
       </p>
-
-      <div>
-        <p>To use ZMK Studio, either:</p>
-        <ul className="list-disc list-inside">
-          <li>
-            Use a browser that supports the above web technologies, e.g.
-            Chrome/Edge, or
-          </li>
-          <li>
-            Download our{" "}
-            <ExternalLink href="/download">
-              cross platform application
-            </ExternalLink>
-            .
-          </li>
-        </ul>
-      </div>
+      <p className="text-xs opacity-75">
+        You can still use Offline Mode to inspect snapshots, tune firmware parameters, edit DTS/keymap files, and run builds &amp; flashes.
+      </p>
     </div>
   );
 }
@@ -277,17 +267,51 @@ export const ConnectModal = ({
   open,
   transports,
   onTransportCreated,
+  onDismiss,
 }: ConnectModalProps) => {
-  const dialog = useModalRef(open || false, false, false);
+  const dialog = useModalRef(open || false, Boolean(onDismiss), true);
 
   const haveTransports = useMemo(() => transports.length > 0, [transports]);
 
   return (
-    <GenericModal ref={dialog} className="max-w-xl">
-      <h1 className="text-xl">Welcome to ZMK Studio</h1>
-      {haveTransports
-        ? connectOptions(transports, onTransportCreated, open)
-        : noTransportsOptionsPrompt()}
+    <GenericModal ref={dialog} className="max-w-xl w-full" onClose={onDismiss}>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <img src="/vmk.svg" alt="VMK Studio" className="h-7 w-7 rounded" />
+            <h1 className="text-lg font-semibold">Connect to VMK Studio</h1>
+          </div>
+          {onDismiss && (
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="p-1 rounded hover:bg-base-300"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
+        {haveTransports
+          ? connectOptions(transports, onTransportCreated, open)
+          : noTransportsOptionsPrompt()}
+
+        {onDismiss && (
+          <div className="pt-3 border-t border-base-300 flex items-center justify-between gap-2">
+            <span className="text-xs opacity-65">
+              Need to tune firmware, edit files, or inspect snapshots?
+            </span>
+            <button
+              type="button"
+              onClick={onDismiss}
+              className="px-3 py-1.5 rounded bg-base-200 hover:bg-base-300 text-xs font-medium"
+            >
+              Continue Offline
+            </button>
+          </div>
+        )}
+      </div>
     </GenericModal>
   );
 };

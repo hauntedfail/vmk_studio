@@ -6,10 +6,15 @@ import {
   useState,
 } from "react";
 import { Key } from "./Key";
+import type { BehaviorKind } from "../vmk/customBehaviors";
 
 export type KeyPosition = PropsWithChildren<{
   id: string;
   header?: string;
+  secondaryLabel?: string;
+  badgeKind?: BehaviorKind;
+  isDiff?: boolean;
+  tooltip?: string;
   width: number;
   height: number;
   x: number;
@@ -47,20 +52,17 @@ interface PhysicalLayoutPositionLocation {
 
 function scalePosition(
   { x, y, r, rx, ry }: PhysicalLayoutPositionLocation,
-  oneU: number,
+  oneU: number
 ): CSSProperties {
-  let left = x * oneU;
-  let top = y * oneU;
+  const left = x * oneU;
+  const top = y * oneU;
   let transformOrigin = undefined;
   let transform = undefined;
   const transformStyle = "preserve-3d";
 
   if (r) {
-    // Use `??` so an explicit rotation origin of 0 is honored; `rx || x`
-    // collapsed a legitimate 0 back to the key's own position, pivoting the
-    // key around its own corner instead of the layout origin (#97).
-    let transformX = ((rx ?? x) - x) * oneU;
-    let transformY = ((ry ?? y) - y) * oneU;
+    const transformX = ((rx ?? x) - x) * oneU;
+    const transformY = ((ry ?? y) - y) * oneU;
     transformOrigin = `${transformX}px ${transformY}px`;
     transform = `rotate(${r}deg)`;
   }
@@ -79,7 +81,8 @@ export const PhysicalLayout = ({
   selectedPosition,
   oneU = 48,
   onPositionClicked,
-  ...props
+  hoverZoom: _hoverZoom,
+  zoom,
 }: PhysicalLayoutProps) => {
   const ref = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
@@ -92,19 +95,20 @@ export const PhysicalLayout = ({
     if (!parent) return;
 
     const calculateScale = () => {
-      if (props.zoom === "auto") {
-        const padding = Math.min(window.innerWidth, window.innerHeight) * 0.05; // Padding when in auto mode
+      if (zoom === "auto") {
+        const padding = Math.min(window.innerWidth, window.innerHeight) * 0.05;
         const newScale = Math.min(
           parent.clientWidth / (element.clientWidth + 2 * padding),
           parent.clientHeight / (element.clientHeight + 2 * padding),
+          1.4
         );
-        setScale(newScale);
+        setScale(Math.max(0.25, newScale));
       } else {
-        setScale(props.zoom || 1);
+        setScale(zoom || 1);
       }
     };
 
-    calculateScale(); // Initial calculation
+    calculateScale();
 
     const resizeObserver = new ResizeObserver(() => {
       calculateScale();
@@ -116,28 +120,31 @@ export const PhysicalLayout = ({
     return () => {
       resizeObserver.disconnect();
     };
-  }, [props.zoom]);
+  }, [zoom, positions.length]);
 
-  // TODO: Add a bit of padding for rotation when supported
-  let rightMost = positions
+  const rightMost = positions
     .map((k) => k.x + k.width)
     .reduce((a, b) => Math.max(a, b), 0);
-  let bottomMost = positions
+  const bottomMost = positions
     .map((k) => k.y + k.height)
     .reduce((a, b) => Math.max(a, b), 0);
 
   const positionItems = positions.map((p, idx) => (
-    <div className="absolute hover:z-10" style={scalePosition(p, oneU)}>
-      <div
-        key={p.id}
+    <div key={p.id} className="absolute hover:z-10" style={scalePosition(p, oneU)}>
+      <Key
+        oneU={oneU}
+        selected={idx === selectedPosition}
+        width={p.width}
+        height={p.height}
+        header={p.header}
+        secondaryLabel={p.secondaryLabel}
+        badgeKind={p.badgeKind}
+        isDiff={p.isDiff}
+        tooltip={p.tooltip}
         onClick={() => onPositionClicked?.(idx)}
       >
-        <Key
-          oneU={oneU}
-          selected={idx === selectedPosition}
-          {...p}
-        />
-      </div>
+        {p.children}
+      </Key>
     </div>
   ));
 
@@ -151,7 +158,6 @@ export const PhysicalLayout = ({
         transformStyle: "preserve-3d",
       }}
       ref={ref}
-      {...props}
     >
       {positionItems}
     </div>

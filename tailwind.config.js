@@ -3,33 +3,37 @@ import trac from "tailwindcss-react-aria-components";
 import contQueries from "@tailwindcss/container-queries";
 
 export default {
+  darkMode: "class",
   content: ["./index.html", "./download.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
-    fontSize: {
-      xs: "0.4rem",
-    },
     extend: {
+      fontSize: {
+        "2xs": "0.65rem",
+        "keycap-xs": "0.45rem",
+      },
       fontFamily: {
-        sans: ["Inter", "system-ui"],
+        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "system-ui", "sans-serif"],
+        keycap: ["Inter", "-apple-system", "system-ui", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
       colors: {
-        primary:
-          "light-dark(oklch(49.12% 0.3096 285.75), oklch(65.69% 0.196 285.75))",
-        "primary-content":
-          "light-dark(oklch(0.89824 0.06192 285.75), oklch(0.13138 0.0392 285.75))",
-        secondary:
-          "light-dark(oklch(69.71% 0.329 342.55), oklch(74.8% 0.26 342.55))",
-        accent:
-          "light-dark(oklch(76.76% 0.184 183.61), oklch(74.51% 0.167 183.61))",
-        "base-content": "light-dark(#1f2937, #A6ADBB)",
-        "base-100": "light-dark(oklch(100% 0 0), #1d232a)",
-        "base-200": "light-dark(#F2F2F2, #191e24)",
-        "base-300": "light-dark(#E5E6E6, #15191e)",
+        background: "var(--background)",
+        foreground: "var(--foreground)",
+        surface: "var(--surface)",
+        recess: "var(--recess)",
+        "surface-elevated": "var(--surface-elevated)",
+        border: "var(--border)",
+        muted: "var(--muted)",
+        "muted-foreground": "var(--muted-foreground)",
+        accent: "var(--accent)",
+        "accent-foreground": "var(--accent-foreground)",
+        primary: "var(--accent)",
+        "primary-content": "var(--accent-foreground)",
+        "base-content": "var(--foreground)",
+        "base-100": "var(--surface)",
+        "base-200": "var(--background)",
+        "base-300": "var(--recess)",
       },
-    },
-
-    fontFamily: {
-      keycap: ["Inter", "system-ui"],
     },
   },
   plugins: [contQueries, trac({ prefix: "rac" })],

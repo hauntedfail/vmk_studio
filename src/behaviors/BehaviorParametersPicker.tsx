@@ -9,6 +9,7 @@ export interface BehaviorParametersPickerProps {
   layers: { id: number; name: string }[];
   onParam1Changed: (value?: number) => void;
   onParam2Changed: (value?: number) => void;
+  isDisabled?: boolean;
 }
 
 export const BehaviorParametersPicker = ({
@@ -18,11 +19,13 @@ export const BehaviorParametersPicker = ({
   layers,
   onParam1Changed,
   onParam2Changed,
+  isDisabled = false,
 }: BehaviorParametersPickerProps) => {
   if (param1 === undefined) {
     return (
       <div>
         <ParameterValuePicker
+          isDisabled={isDisabled}
           values={metadata.flatMap((m) => m.param1)}
           onValueChanged={onParam1Changed}
           layers={layers}
@@ -38,8 +41,9 @@ export const BehaviorParametersPicker = ({
       )
     );
     return (
-      <>
+      <div className="flex flex-col gap-2">
         <ParameterValuePicker
+          isDisabled={isDisabled}
           values={metadata.flatMap((m) => m.param1)}
           value={param1}
           layers={layers}
@@ -47,13 +51,14 @@ export const BehaviorParametersPicker = ({
         />
         {(set?.param2?.length || 0) > 0 && (
           <ParameterValuePicker
+            isDisabled={isDisabled}
             values={set!.param2}
             value={param2}
             layers={layers}
             onValueChanged={onParam2Changed}
           />
         )}
-      </>
+      </div>
     );
   }
 };

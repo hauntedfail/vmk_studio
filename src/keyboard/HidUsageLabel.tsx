@@ -1,7 +1,5 @@
-import {
-  hid_usage_get_labels,
-  hid_usage_page_and_id_from_usage,
-} from "../hid-usages";
+import { hid_usage_get_labels } from "../hid-usages";
+import { decodeHidUsageWithMods } from "../vmk/customBehaviors";
 
 export interface HidUsageLabelProps {
   hid_usage: number;
@@ -12,21 +10,25 @@ function remove_prefix(s?: string) {
 }
 
 export const HidUsageLabel = ({ hid_usage }: HidUsageLabelProps) => {
-  let [page, id] = hid_usage_page_and_id_from_usage(hid_usage);
+  const decoded = decodeHidUsageWithMods(hid_usage);
+  const labels = hid_usage_get_labels(decoded.page, decoded.id);
+  const modPrefix =
+    decoded.modLabels.length > 0 ? `${decoded.modLabels.join("")}+` : "";
 
-  // TODO: Do something with implicit mods!
-  page &= 0xff;
+  const shortText = remove_prefix(labels.short);
+  const medText = remove_prefix(labels.med || labels.short);
+  const longText = remove_prefix(labels.long || labels.med || labels.short);
 
-  let labels = hid_usage_get_labels(page, id);
+  if (!shortText && !medText && !longText) {
+    return null;
+  }
 
   return (
     <span
-      className="@[10em]:before:content-[attr(data-long-content)] @[6em]:before:content-[attr(data-med-content)] before:content-[attr(aria-label)]"
-      aria-label={remove_prefix(labels.short)}
-      data-med-content={remove_prefix(labels.med || labels.short)}
-      data-long-content={remove_prefix(
-        labels.long || labels.med || labels.short
-      )}
+      className="text-xs leading-tight text-center px-0.5 truncate max-w-full @[10em]:before:content-[attr(data-long-content)] @[6em]:before:content-[attr(data-med-content)] before:content-[attr(aria-label)]"
+      aria-label={`${modPrefix}${shortText ?? ""}`}
+      data-med-content={`${modPrefix}${medText ?? ""}`}
+      data-long-content={`${modPrefix}${longText ?? ""}`}
     />
   );
 };

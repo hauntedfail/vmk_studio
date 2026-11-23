@@ -31,12 +31,29 @@ import { LockStateContext } from "../rpc/LockStateContext";
 import { LockState } from "@zmkfirmware/zmk-studio-ts-client/core";
 import { deserializeLayoutZoom, LayoutZoom } from "./PhysicalLayout";
 import { useLocalStorageState } from "../misc/useLocalStorageState";
+import type {
+  CustomBehaviorDef,
+  SnapshotSummary,
+  StudioSnapshot,
+} from "../vmk/types";
+import { diffKeymapAgainstSnapshot } from "../vmk/customBehaviors";
+import { readSnapshot, saveSnapshot } from "../vmk/api";
+import { Camera, Check, GitCompare, RotateCcw, Shield, ShieldOff } from "lucide-react";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
+export interface KeyboardProps {
+  deviceName?: string;
+  customBehaviors?: CustomBehaviorDef[];
+  snapshots?: SnapshotSummary[];
+  backupsDir?: string;
+  onSnapshotSaved?: () => Promise<void>;
+  onSwitchToRepoKeymap?: () => void;
+}
+
 function useBehaviors(): BehaviorMap {
-  let connection = useContext(ConnectionContext);
-  let lockState = useContext(LockStateContext);
+  const connection = useContext(ConnectionContext);
+  const lockState = useContext(LockStateContext);
 
   const [behaviors, setBehaviors] = useState<BehaviorMap>({});
 
@@ -56,25 +73,25 @@ function useBehaviors(): BehaviorMap {
         return;
       }
 
-      let get_behaviors: Request = {
+      const get_behaviors: Request = {
         behaviors: { listAllBehaviors: true },
         requestId: 0,
       };
 
-      let behavior_list = await call_rpc(connection.conn, get_behaviors);
+      const behavior_list = await call_rpc(connection.conn, get_behaviors);
       if (!ignore) {
-        let behavior_map: BehaviorMap = {};
-        for (let behaviorId of behavior_list.behaviors?.listAllBehaviors
+        const behavior_map: BehaviorMap = {};
+        for (const behaviorId of behavior_list.behaviors?.listAllBehaviors
           ?.behaviors || []) {
           if (ignore) {
             break;
           }
-          let details_req = {
+          const details_req = {
             behaviors: { getBehaviorDetails: { behaviorId } },
             requestId: 0,
           };
-          let behavior_details = await call_rpc(connection.conn, details_req);
-          let dets: GetBehaviorDetailsResponse | undefined =
+          const behavior_details = await call_rpc(connection.conn, details_req);
+          const dets: GetBehaviorDetailsResponse | undefined =
             behavior_details?.behaviors?.getBehaviorDetails;
 
           if (dets) {
@@ -105,8 +122,8 @@ function useLayouts(): [
   number,
   React.Dispatch<SetStateAction<number>>
 ] {
-  let connection = useContext(ConnectionContext);
-  let lockState = useContext(LockStateContext);
+  const connection = useContext(ConnectionContext);
+  const lockState = useContext(LockStateContext);
 
   const [layouts, setLayouts] = useState<PhysicalLayout[] | undefined>(
     undefined
@@ -130,7 +147,7 @@ function useLayouts(): [
         return;
       }
 
-      let response = await call_rpc(connection.conn, {
+      const response = await call_rpc(connection.conn, {
         keymap: { getPhysicalLayouts: true },
       });
 
@@ -158,7 +175,14 @@ function useLayouts(): [
   ];
 }
 
-export default function Keyboard() {
+export default function Keyboard({
+  deviceName = "Toucan",
+  customBehaviors = [],
+  snapshots = [],
+  backupsDir,
+  onSnapshotSaved,
+  onSwitchToRepoKeymap,
+}: KeyboardProps) {
   const [
     layouts,
     _setLayouts,
@@ -167,16 +191,22 @@ export default function Keyboard() {
   ] = useLayouts();
   const [keymap, setKeymap] = useConnectedDeviceData<Keymap>(
     { keymap: { getKeymap: true } },
-    (keymap) => {
-      console.log("Got the keymap!");
-      return keymap?.keymap?.getKeymap;
-    },
+    (km) => km?.keymap?.getKeymap,
     true
   );
 
-  const [keymapScale, setKeymapScale] = useLocalStorageState<LayoutZoom>("keymapScale", "auto", {
-    deserialize: deserializeLayoutZoom,
-  });
+  const [keymapScale, setKeymapScale] = useLocalStorageState<LayoutZoom>(
+    "keymapScale",
+    "auto",
+    {
+      deserialize: deserializeLayoutZoom,
+    }
+  );
+
+  const [guardEnabled, setGuardEnabled] = useState(true);
+  const [compareSnapshotRel, setCompareSnapshotRel] = useState<string>("");
+  const [comparedSnapshot, setComparedSnapshot] = useState<StudioSnapshot | null>(null);
+  const [snapshotToast, setSnapshotToast] = useState<string | null>(null);
 
   const [selectedLayerIndex, setSelectedLayerIndex] = useState<number>(0);
   const [selectedKeyPosition, setSelectedKeyPosition] = useState<
@@ -193,16 +223,34 @@ export default function Keyboard() {
   }, [conn]);
 
   useEffect(() => {
+    if (!compareSnapshotRel) {
+      setComparedSnapshot(null);
+      return;
+    }
+    let cancelled = false;
+    readSnapshot(compareSnapshotRel, backupsDir)
+      .then((snap) => {
+        if (!cancelled) setComparedSnapshot(snap);
+      })
+      .catch(() => {
+        if (!cancelled) setComparedSnapshot(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [compareSnapshotRel, backupsDir]);
+
+  useEffect(() => {
     async function performSetRequest() {
       if (!conn.conn || !layouts) {
         return;
       }
 
-      let resp = await call_rpc(conn.conn, {
+      const resp = await call_rpc(conn.conn, {
         keymap: { setActivePhysicalLayout: selectedPhysicalLayoutIndex },
       });
 
-      let new_keymap = resp?.keymap?.setActivePhysicalLayout?.ok;
+      const new_keymap = resp?.keymap?.setActivePhysicalLayout?.ok;
       if (new_keymap) {
         setKeymap(new_keymap);
       } else {
@@ -216,9 +264,9 @@ export default function Keyboard() {
     performSetRequest();
   }, [selectedPhysicalLayoutIndex]);
 
-  let doSelectPhysicalLayout = useCallback(
+  const doSelectPhysicalLayout = useCallback(
     (i: number) => {
-      let oldLayout = selectedPhysicalLayoutIndex;
+      const oldLayout = selectedPhysicalLayoutIndex;
       undoRedo?.(async () => {
         setSelectedPhysicalLayoutIndex(i);
 
@@ -230,26 +278,19 @@ export default function Keyboard() {
     [undoRedo, selectedPhysicalLayoutIndex]
   );
 
-  let doUpdateBinding = useCallback(
-    (binding: BehaviorBinding) => {
-      if (!keymap || selectedKeyPosition === undefined) {
-        console.error(
-          "Can't update binding without a selected key position and loaded keymap"
-        );
-        return;
-      }
+  const doUpdateBindingAt = useCallback(
+    (layerIdx: number, keyPos: number, binding: BehaviorBinding) => {
+      if (!keymap) return;
+      const layerId = keymap.layers[layerIdx].id;
+      const oldBinding = keymap.layers[layerIdx].bindings[keyPos];
 
-      const layer = selectedLayerIndex;
-      const layerId = keymap.layers[layer].id;
-      const keyPosition = selectedKeyPosition;
-      const oldBinding = keymap.layers[layer].bindings[keyPosition];
       undoRedo?.(async () => {
         if (!conn.conn) {
           throw new Error("Not connected");
         }
 
-        let resp = await call_rpc(conn.conn, {
-          keymap: { setLayerBinding: { layerId, keyPosition, binding } },
+        const resp = await call_rpc(conn.conn, {
+          keymap: { setLayerBinding: { layerId, keyPosition: keyPos, binding } },
         });
 
         if (
@@ -258,7 +299,7 @@ export default function Keyboard() {
         ) {
           setKeymap(
             produce((draft: any) => {
-              draft.layers[layer].bindings[keyPosition] = binding;
+              draft.layers[layerIdx].bindings[keyPos] = binding;
             })
           );
         } else {
@@ -270,35 +311,134 @@ export default function Keyboard() {
             return;
           }
 
-          let resp = await call_rpc(conn.conn, {
+          const undoResp = await call_rpc(conn.conn, {
             keymap: {
-              setLayerBinding: { layerId, keyPosition, binding: oldBinding },
+              setLayerBinding: { layerId, keyPosition: keyPos, binding: oldBinding },
             },
           });
           if (
-            resp.keymap?.setLayerBinding ===
+            undoResp.keymap?.setLayerBinding ===
             SetLayerBindingResponse.SET_LAYER_BINDING_RESP_OK
           ) {
             setKeymap(
               produce((draft: any) => {
-                draft.layers[layer].bindings[keyPosition] = oldBinding;
+                draft.layers[layerIdx].bindings[keyPos] = oldBinding;
               })
             );
-          } else {
           }
         };
       });
     },
-    [conn, keymap, undoRedo, selectedLayerIndex, selectedKeyPosition]
+    [conn, keymap, undoRedo]
   );
 
-  let selectedBinding = useMemo(() => {
-    if (keymap == null || selectedKeyPosition == null || !keymap.layers[selectedLayerIndex]) {
+  const doUpdateBinding = useCallback(
+    (binding: BehaviorBinding) => {
+      if (!keymap || selectedKeyPosition === undefined) {
+        return;
+      }
+      doUpdateBindingAt(selectedLayerIndex, selectedKeyPosition, binding);
+    },
+    [keymap, selectedLayerIndex, selectedKeyPosition, doUpdateBindingAt]
+  );
+
+  const selectedBinding = useMemo(() => {
+    if (
+      keymap == null ||
+      selectedKeyPosition == null ||
+      !keymap.layers[selectedLayerIndex]
+    ) {
       return null;
     }
 
     return keymap.layers[selectedLayerIndex].bindings[selectedKeyPosition];
   }, [keymap, selectedLayerIndex, selectedKeyPosition]);
+
+  const allDiffs = useMemo(() => {
+    if (!keymap || !comparedSnapshot) return [];
+    return diffKeymapAgainstSnapshot(keymap, comparedSnapshot);
+  }, [keymap, comparedSnapshot]);
+
+  const currentLayerDiffPositions = useMemo(() => {
+    const set = new Set<number>();
+    for (const d of allDiffs) {
+      if (d.layerIndex === selectedLayerIndex) set.add(d.keyPosition);
+    }
+    return set;
+  }, [allDiffs, selectedLayerIndex]);
+
+  const selectedSnapshotBaseline = useMemo(() => {
+    if (selectedKeyPosition === undefined || !comparedSnapshot || !keymap) {
+      return undefined;
+    }
+    const curLayer = keymap.layers[selectedLayerIndex];
+    if (!curLayer) return undefined;
+    const snapLayer =
+      comparedSnapshot.layers.find((l) => l.id === curLayer.id) ??
+      comparedSnapshot.layers[selectedLayerIndex];
+    const b = snapLayer?.bindings[selectedKeyPosition];
+    if (!b) return undefined;
+    return {
+      behaviorId: b.behavior_id,
+      param1: b.param1,
+      param2: b.param2,
+    };
+  }, [selectedKeyPosition, comparedSnapshot, keymap, selectedLayerIndex]);
+
+  const handleSaveSnapshot = async () => {
+    if (!keymap) return;
+    const note = window.prompt("Optional note for this live keymap snapshot:", "before-edit");
+    if (note === null) return;
+
+    const behaviorSummaries: StudioSnapshot["behaviors"] = {};
+    for (const [idStr, b] of Object.entries(behaviors)) {
+      behaviorSummaries[Number(idStr)] = {
+        id: b.id,
+        displayName: b.displayName,
+      };
+    }
+
+    const snap: StudioSnapshot = {
+      device: deviceName,
+      saved_at: new Date().toISOString(),
+      note: note.trim() || undefined,
+      behavior_ids: Object.keys(behaviors).map(Number),
+      behaviors: behaviorSummaries,
+      layers: keymap.layers.map((l) => ({
+        id: l.id,
+        name: l.name,
+        bindings: l.bindings.map((b) => ({
+          behavior_id: b.behaviorId,
+          param1: b.param1,
+          param2: b.param2,
+        })),
+      })),
+    };
+
+    try {
+      const saved = await saveSnapshot(note.trim() || "live", snap, backupsDir);
+      setSnapshotToast(`Saved ${saved.name}`);
+      await onSnapshotSaved?.();
+      window.setTimeout(() => setSnapshotToast(null), 4000);
+    } catch (e) {
+      window.alert(`Failed to save snapshot: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleRestoreLayerFromSnapshot = async () => {
+    if (!keymap || !comparedSnapshot) return;
+    const diffsOnLayer = allDiffs.filter((d) => d.layerIndex === selectedLayerIndex && d.baseline);
+    if (diffsOnLayer.length === 0) return;
+    const ok = window.confirm(
+      `Restore ${diffsOnLayer.length} differing key(s) on layer "${keymap.layers[selectedLayerIndex].name}" from snapshot?`
+    );
+    if (!ok) return;
+    for (const d of diffsOnLayer) {
+      if (d.baseline) {
+        doUpdateBindingAt(selectedLayerIndex, d.keyPosition, d.baseline);
+      }
+    }
+  };
 
   const moveLayer = useCallback(
     (start: number, end: number) => {
@@ -307,7 +447,7 @@ export default function Keyboard() {
           return;
         }
 
-        let resp = await call_rpc(conn.conn, {
+        const resp = await call_rpc(conn.conn, {
           keymap: { moveLayer: { startIndex, destIndex } },
         });
 
@@ -324,7 +464,7 @@ export default function Keyboard() {
         return () => doMove(end, start);
       });
     },
-    [undoRedo]
+    [undoRedo, conn]
   );
 
   const addLayer = useCallback(() => {
@@ -348,7 +488,6 @@ export default function Keyboard() {
 
         return resp.keymap.addLayer.ok.index;
       } else {
-        console.error("Add error", resp.keymap?.addLayer?.err);
         throw new Error("Failed to add layer:" + resp.keymap?.addLayer?.err);
       }
     }
@@ -362,7 +501,6 @@ export default function Keyboard() {
         keymap: { removeLayer: { layerIndex } },
       });
 
-      console.log(resp);
       if (resp.keymap?.removeLayer?.ok) {
         setKeymap(
           produce((draft: any) => {
@@ -371,7 +509,6 @@ export default function Keyboard() {
           })
         );
       } else {
-        console.error("Remove error", resp.keymap?.removeLayer?.err);
         throw new Error(
           "Failed to remove layer:" + resp.keymap?.removeLayer?.err
         );
@@ -379,7 +516,7 @@ export default function Keyboard() {
     }
 
     undoRedo?.(async () => {
-      let index = await doAdd();
+      const index = await doAdd();
       return () => doRemove(index);
     });
   }, [conn, undoRedo, keymap]);
@@ -405,7 +542,6 @@ export default function Keyboard() {
           })
         );
       } else {
-        console.error("Remove error", resp.keymap?.removeLayer?.err);
         throw new Error(
           "Failed to remove layer:" + resp.keymap?.removeLayer?.err
         );
@@ -421,7 +557,6 @@ export default function Keyboard() {
         keymap: { restoreLayer: { layerId, atIndex } },
       });
 
-      console.log(resp);
       if (resp.keymap?.restoreLayer?.ok) {
         setKeymap(
           produce((draft: any) => {
@@ -431,7 +566,6 @@ export default function Keyboard() {
         );
         setSelectedLayerIndex(atIndex);
       } else {
-        console.error("Remove error", resp.keymap?.restoreLayer?.err);
         throw new Error(
           "Failed to restore layer:" + resp.keymap?.restoreLayer?.err
         );
@@ -442,13 +576,13 @@ export default function Keyboard() {
       throw new Error("No keymap loaded");
     }
 
-    let index = selectedLayerIndex;
-    let layerId = keymap.layers[index].id;
+    const index = selectedLayerIndex;
+    const layerId = keymap.layers[index].id;
     undoRedo?.(async () => {
       await doRemove(index);
       return () => doRestore(layerId, index);
     });
-  }, [conn, undoRedo, selectedLayerIndex]);
+  }, [conn, undoRedo, selectedLayerIndex, keymap]);
 
   const changeLayerName = useCallback(
     (id: number, oldName: string, newName: string) => {
@@ -501,47 +635,145 @@ export default function Keyboard() {
   }, [keymap, selectedLayerIndex]);
 
   return (
-    <div className="grid grid-cols-[auto_1fr] grid-rows-[1fr_minmax(10em,auto)] bg-base-300 max-w-full min-w-0 min-h-0">
-      <div className="p-2 flex flex-col gap-2 bg-base-200 row-span-2">
+    <div className="h-full grid grid-cols-[220px_1fr] grid-rows-[auto_1fr_minmax(10.5em,auto)] bg-base-300 max-w-full min-w-0 min-h-0 overflow-hidden">
+      {/* VMK Safety & Snapshot Toolbar */}
+      <div className="col-span-2 flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-base-200 border-b border-base-300 text-xs">
+        <div className="flex flex-wrap items-center gap-2">
+          {onSwitchToRepoKeymap && (
+            <button
+              type="button"
+              onClick={onSwitchToRepoKeymap}
+              className="px-2.5 py-1 rounded bg-base-300 hover:bg-base-100 text-xs font-medium"
+            >
+              Visual Repo Keymap (toucan.keymap)
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setGuardEnabled((v) => !v)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-medium transition-colors ${
+              guardEnabled
+                ? "bg-emerald-950/40 border-emerald-500/45 text-emerald-300"
+                : "bg-base-300 border-base-content/15 text-base-content/70"
+            }`}
+            title="Prevents accidental overwrite of custom firmware behaviors and safety keys"
+          >
+            {guardEnabled ? (
+              <Shield className="w-3.5 h-3.5" />
+            ) : (
+              <ShieldOff className="w-3.5 h-3.5" />
+            )}
+            Custom Overwrite Guard: {guardEnabled ? "ON" : "OFF"}
+          </button>
+
+          <button
+            type="button"
+            disabled={!keymap}
+            onClick={handleSaveSnapshot}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-base-300 hover:bg-base-100 text-xs font-medium disabled:opacity-40"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            Save Snapshot
+          </button>
+
+          {snapshotToast && (
+            <span className="inline-flex items-center gap-1 text-emerald-400">
+              <Check className="w-3.5 h-3.5" />
+              {snapshotToast}
+            </span>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <GitCompare className="w-3.5 h-3.5 opacity-60" />
+          <select
+            value={compareSnapshotRel}
+            onChange={(e) => setCompareSnapshotRel(e.target.value)}
+            className="h-7 px-2 rounded bg-base-100 border border-base-300 text-xs max-w-[240px]"
+          >
+            <option value="">Compare against snapshot...</option>
+            {snapshots.map((s) => (
+              <option key={s.relPath} value={s.relPath}>
+                {s.relPath}
+              </option>
+            ))}
+          </select>
+
+          {comparedSnapshot && (
+            <span className="px-2 py-0.5 rounded bg-sky-950/50 border border-sky-400/40 text-sky-300 text-2xs font-mono">
+              {allDiffs.length} diff(s)
+            </span>
+          )}
+
+          {currentLayerDiffPositions.size > 0 && (
+            <button
+              type="button"
+              onClick={handleRestoreLayerFromSnapshot}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-sky-600/25 hover:bg-sky-600/40 border border-sky-400/40 text-sky-200 text-2xs font-medium"
+            >
+              <RotateCcw className="w-3 h-3" />
+              Restore Layer ({currentLayerDiffPositions.size})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Left Sidebar: Layouts & Layers */}
+      <div className="p-2.5 flex flex-col gap-3 bg-base-200 border-r border-base-300 row-span-2 overflow-y-auto">
         {layouts && (
-          <div className="col-start-3 row-start-1 row-end-2">
-            <PhysicalLayoutPicker
-              layouts={layouts}
-              selectedPhysicalLayoutIndex={selectedPhysicalLayoutIndex}
-              onPhysicalLayoutClicked={doSelectPhysicalLayout}
-            />
-          </div>
+          <PhysicalLayoutPicker
+            layouts={layouts}
+            selectedPhysicalLayoutIndex={selectedPhysicalLayoutIndex}
+            onPhysicalLayoutClicked={doSelectPhysicalLayout}
+          />
         )}
 
         {keymap && (
-          <div className="col-start-1 row-start-1 row-end-2">
-            <LayerPicker
-              layers={keymap.layers}
-              selectedLayerIndex={selectedLayerIndex}
-              onLayerClicked={setSelectedLayerIndex}
-              onLayerMoved={moveLayer}
-              canAdd={(keymap.availableLayers || 0) > 0}
-              canRemove={(keymap.layers?.length || 0) > 1}
-              onAddClicked={addLayer}
-              onRemoveClicked={removeLayer}
-              onLayerNameChanged={changeLayerName}
-            />
-          </div>
+          <LayerPicker
+            layers={keymap.layers}
+            selectedLayerIndex={selectedLayerIndex}
+            onLayerClicked={setSelectedLayerIndex}
+            onLayerMoved={moveLayer}
+            canAdd={(keymap.availableLayers || 0) > 0}
+            canRemove={(keymap.layers?.length || 0) > 1}
+            onAddClicked={addLayer}
+            onRemoveClicked={removeLayer}
+            onLayerNameChanged={changeLayerName}
+          />
         )}
+
+        <div className="mt-auto pt-2 border-t border-base-300 text-2xs space-y-1 opacity-75">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            Custom firmware behavior
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-amber-400" />
+            Safety key (Unlock / Boot)
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-sky-400" />
+            Differs from snapshot
+          </div>
+        </div>
       </div>
-      {layouts && keymap && behaviors && (
-        <div className="p-2 col-start-2 row-start-1 grid items-center justify-center relative min-w-0">
+
+      {/* Main Visual Keymap */}
+      {layouts && keymap && behaviors ? (
+        <div className="vmk-stage-mat p-4 col-start-2 row-start-2 grid items-center justify-center relative min-w-0 min-h-0 overflow-hidden">
           <KeymapComp
             keymap={keymap}
             layout={layouts[selectedPhysicalLayoutIndex]}
             behaviors={behaviors}
+            customBehaviors={customBehaviors}
+            diffPositions={currentLayerDiffPositions}
             scale={keymapScale}
             selectedLayerIndex={selectedLayerIndex}
             selectedKeyPosition={selectedKeyPosition}
             onKeyPositionClicked={setSelectedKeyPosition}
           />
           <select
-            className="absolute top-2 right-2 h-8 rounded px-2"
+            className="absolute top-3 right-3 h-7 rounded-lg px-2 text-xs bg-surface border border-border text-foreground"
             value={keymapScale}
             onChange={(e) => {
               const value = deserializeLayoutZoom(e.target.value);
@@ -549,29 +781,42 @@ export default function Keyboard() {
             }}
           >
             <option value="auto">Auto</option>
-            <option value={0.25}>25%</option>
             <option value={0.5}>50%</option>
             <option value={0.75}>75%</option>
             <option value={1}>100%</option>
             <option value={1.25}>125%</option>
             <option value={1.5}>150%</option>
-            <option value={2}>200%</option>
           </select>
         </div>
+      ) : (
+        <div className="col-start-2 row-start-2 flex items-center justify-center text-sm opacity-70">
+          Waiting for keyboard unlock / keymap data...
+        </div>
       )}
-      {keymap && selectedBinding && (
-        <div className="p-2 col-start-2 row-start-2 bg-base-200">
+
+      {/* Bottom Key Binding Editor */}
+      <div className="p-3 col-start-2 row-start-3 bg-base-200 border-t border-base-300 overflow-y-auto">
+        {keymap && selectedBinding ? (
           <BehaviorBindingPicker
             binding={selectedBinding}
             behaviors={Object.values(behaviors)}
+            customBehaviors={customBehaviors}
+            guardEnabled={guardEnabled}
+            keyPosition={selectedKeyPosition}
+            snapshotBaseline={selectedSnapshotBaseline}
+            onRestoreFromSnapshot={doUpdateBinding}
             layers={keymap.layers.map(({ id, name }, li) => ({
               id,
               name: name || li.toLocaleString(),
             }))}
             onBindingChanged={doUpdateBinding}
           />
-        </div>
-      )}
+        ) : (
+          <div className="text-xs opacity-65">
+            Select a key above to edit its binding. Custom firmware behaviors are automatically protected by the Custom Overwrite Guard.
+          </div>
+        )}
+      </div>
     </div>
   );
 }

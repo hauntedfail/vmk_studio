@@ -1,4 +1,4 @@
-import { createContext, useMemo, useState } from "react";
+import { createContext, useCallback, useMemo, useState } from "react";
 
 export type UndoCallback = () => Promise<void>;
 
@@ -73,10 +73,10 @@ export function useUndoRedo(): [
     return await doIt(doCb, true);
   };
 
-  const reset = () => {
-    setRedoStack([]);
-    setUndoStack([]);
-  };
+  const reset = useCallback(() => {
+    setRedoStack((prev) => (prev.length === 0 ? prev : []));
+    setUndoStack((prev) => (prev.length === 0 ? prev : []));
+  }, []);
 
   return [doIt, undo, redo, canUndo, canRedo, reset];
 }

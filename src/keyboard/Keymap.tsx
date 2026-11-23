@@ -9,6 +9,12 @@ import {
   PhysicalLayout as PhysicalLayoutComp,
 } from "./PhysicalLayout";
 import { HidUsageLabel } from "./HidUsageLabel";
+import type { CustomBehaviorDef } from "../vmk/types";
+import {
+  classifyBehavior,
+  formatHex,
+  formatShortBindingSummary,
+} from "../vmk/customBehaviors";
 
 type BehaviorMap = Record<number, GetBehaviorDetailsResponse>;
 
@@ -16,6 +22,8 @@ export interface KeymapProps {
   layout: PhysicalLayout;
   keymap: KeymapMsg;
   behaviors: BehaviorMap;
+  customBehaviors?: CustomBehaviorDef[];
+  diffPositions?: Set<number>;
   scale: LayoutZoom;
   selectedLayerIndex: number;
   selectedKeyPosition: number | undefined;
@@ -26,19 +34,27 @@ export const Keymap = ({
   layout,
   keymap,
   behaviors,
+  customBehaviors = [],
+  diffPositions,
   scale,
   selectedLayerIndex,
   selectedKeyPosition,
   onKeyPositionClicked,
 }: KeymapProps) => {
-  if (!keymap.layers[selectedLayerIndex]) {
+  const layer = keymap.layers[selectedLayerIndex];
+  if (!layer) {
     return <></>;
   }
 
+  const layerSummaries = keymap.layers.map((l, idx) => ({
+    id: l.id,
+    name: l.name || `L${idx}`,
+  }));
+
   const positions = layout.keys.map((k, i) => {
-    if (i >= keymap.layers[selectedLayerIndex].bindings.length) {
+    if (i >= layer.bindings.length) {
       return {
-        id: `${keymap.layers[selectedLayerIndex].id}-${i}`,
+        id: `${layer.id}-${i}`,
         header: "Unknown",
         x: k.x / 100.0,
         y: k.y / 100.0,
@@ -48,11 +64,30 @@ export const Keymap = ({
       };
     }
 
+    const binding = layer.bindings[i];
+    const behavior = behaviors[binding.behaviorId];
+    const cls = classifyBehavior(behavior, customBehaviors);
+    const summary = formatShortBindingSummary(binding, behaviors, layerSummaries);
+    const isStandardKeyPress =
+      behavior?.displayName === "Key Press" ||
+      behavior?.displayName === "Sticky Key" ||
+      behavior?.displayName === "Key Toggle";
+
+    const tooltipParts = [
+      `Key #${i}: ${cls.label} (id=${binding.behaviorId})`,
+      cls.customDef ? `DTS: &${cls.customDef.label} (${cls.customDef.sourceFile})` : null,
+      binding.param1 ? `param1=${binding.param1} (${formatHex(binding.param1)})` : null,
+      binding.param2 ? `param2=${binding.param2} (${formatHex(binding.param2)})` : null,
+      diffPositions?.has(i) ? "Differs from compared snapshot" : null,
+    ].filter(Boolean);
+
     return {
-      id: `${keymap.layers[selectedLayerIndex].id}-${i}`,
-      header:
-        behaviors[keymap.layers[selectedLayerIndex].bindings[i].behaviorId]
-          ?.displayName || "Unknown",
+      id: `${layer.id}-${i}`,
+      header: summary.header,
+      secondaryLabel: summary.secondary,
+      badgeKind: cls.kind,
+      isDiff: diffPositions?.has(i) ?? false,
+      tooltip: tooltipParts.join("\n"),
       x: k.x / 100.0,
       y: k.y / 100.0,
       width: k.width / 100,
@@ -60,10 +95,12 @@ export const Keymap = ({
       r: (k.r || 0) / 100.0,
       rx: (k.rx || 0) / 100.0,
       ry: (k.ry || 0) / 100.0,
-      children: (
-        <HidUsageLabel
-          hid_usage={keymap.layers[selectedLayerIndex].bindings[i].param1}
-        />
+      children: isStandardKeyPress ? (
+        <HidUsageLabel hid_usage={binding.param1} />
+      ) : (
+        <span className="text-[0.65rem] font-medium text-center leading-tight line-clamp-2 break-words">
+          {summary.primary}
+        </span>
       ),
     };
   });
@@ -71,7 +108,7 @@ export const Keymap = ({
   return (
     <PhysicalLayoutComp
       positions={positions}
-      oneU={48}
+      oneU={52}
       hoverZoom={true}
       zoom={scale}
       selectedPosition={selectedKeyPosition}

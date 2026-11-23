@@ -6,6 +6,7 @@ export interface ParameterValuePickerProps {
   values: BehaviorParameterValueDescription[];
   layers: { id: number; name: string }[];
   onValueChanged: (value?: number) => void;
+  isDisabled?: boolean;
 }
 
 export const ParameterValuePicker = ({
@@ -13,19 +14,23 @@ export const ParameterValuePicker = ({
   values,
   layers,
   onValueChanged,
+  isDisabled = false,
 }: ParameterValuePickerProps) => {
   if (values.length == 0) {
     return <></>;
   } else if (values.every((v) => v.constant !== undefined)) {
     return (
-      <div>
+      <div className="flex items-center gap-1.5">
         <select
-          value={value}
-          className="h-8 rounded"
-          onChange={(e) => onValueChanged(parseInt(e.target.value))}
+          value={value ?? ""}
+          disabled={isDisabled}
+          className="h-8 px-2 text-sm rounded bg-base-100 border border-base-300 disabled:opacity-50"
+          onChange={(e) => onValueChanged(parseInt(e.target.value, 10))}
         >
           {values.map((v) => (
-            <option value={v.constant}>{v.name}</option>
+            <option key={v.constant} value={v.constant}>
+              {v.name}
+            </option>
           ))}
         </select>
       </div>
@@ -33,20 +38,23 @@ export const ParameterValuePicker = ({
   } else if (values.length == 1) {
     if (values[0].range) {
       return (
-        <div>
-          <label>{values[0].name}: </label>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs font-medium opacity-80">{values[0].name}:</label>
           <input
             type="number"
+            disabled={isDisabled}
             min={values[0].range.min}
             max={values[0].range.max}
-            value={value}
-            onChange={(e) => onValueChanged(parseInt(e.target.value))}
+            value={value ?? 0}
+            className="h-8 w-24 px-2 text-sm rounded bg-base-100 border border-base-300 disabled:opacity-50"
+            onChange={(e) => onValueChanged(parseInt(e.target.value, 10))}
           />
         </div>
       );
     } else if (values[0].hidUsage) {
       return (
         <HidUsagePicker
+          isDisabled={isDisabled}
           onValueChanged={onValueChanged}
           label={values[0].name}
           value={value}
@@ -58,26 +66,28 @@ export const ParameterValuePicker = ({
       );
     } else if (values[0].layerId) {
       return (
-        <div>
-          <label>{values[0].name}: </label>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs font-medium opacity-80">{values[0].name}:</label>
           <select
-            value={value}
-            className="h-8 rounded"
-            onChange={(e) => onValueChanged(parseInt(e.target.value))}
+            value={value ?? 0}
+            disabled={isDisabled}
+            className="h-8 px-2 text-sm rounded bg-base-100 border border-base-300 disabled:opacity-50"
+            onChange={(e) => onValueChanged(parseInt(e.target.value, 10))}
           >
             {layers.map(({ name, id }) => (
-              <option value={id}>{name}</option>
+              <option key={id} value={id}>
+                {name}
+              </option>
             ))}
           </select>
         </div>
       );
     }
   } else {
-    console.log("Not sure how to handle", values);
     return (
-      <>
-        <p>Some composite?</p>
-      </>
+      <div className="text-xs px-2 py-1 rounded bg-amber-950/30 border border-amber-500/40 text-amber-200">
+        Composite parameter set detected — use the Raw Inspector toggle to inspect or edit safely without data loss.
+      </div>
     );
   }
 

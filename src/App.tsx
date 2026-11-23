@@ -1,4 +1,4 @@
-import { AppHeader } from "./AppHeader";
+import { AppHeader, VmkTab } from "./AppHeader";
 
 import { create_rpc_connection } from "@zmkfirmware/zmk-studio-ts-client";
 import { call_rpc } from "./rpc/logging";
@@ -29,12 +29,31 @@ import { valueAfter } from "./misc/async";
 import { AppFooter } from "./AppFooter";
 import { AboutModal } from "./AboutModal";
 import { LicenseNoticeModal } from "./misc/LicenseNoticeModal";
+import {
+  getFirmwareModel,
+  getWorkspaceStatus,
+  listSnapshots,
+  loadSavedWorkspacePaths,
+} from "./vmk/api";
+import type {
+  FirmwareModel,
+  SnapshotSummary,
+  VmkWorkspacePaths,
+  VmkWorkspaceStatus,
+} from "./vmk/types";
+import { VisualRepoKeymapEditor } from "./vmk/components/VisualRepoKeymapEditor";
+import { FirmwareTunerView } from "./vmk/components/FirmwareTunerView";
+import { CustomBehaviorsAndFilesView } from "./vmk/components/CustomBehaviorsAndFilesView";
+import { BuildAndFlashView } from "./vmk/components/BuildAndFlashView";
+import { Toaster, toast } from "@/components/ui/toast";
 
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: object;
   }
 }
+
+const THEME_STORAGE_KEY = "vmk_studio_theme_v1";
 
 const TRANSPORTS: TransportFactory[] = [
   navigator.serial && { label: "USB", connect: serial_connect },
@@ -70,17 +89,17 @@ async function listen_for_notifications(
   notification_stream: ReadableStream<Notification>,
   signal: AbortSignal
 ): Promise<void> {
-  let reader = notification_stream.getReader();
+  const reader = notification_stream.getReader();
   const onAbort = () => {
     reader.cancel();
     reader.releaseLock();
   };
   signal.addEventListener("abort", onAbort, { once: true });
   do {
-    let pub = usePub();
+    const pub = usePub();
 
     try {
-      let { done, value } = await reader.read();
+      const { done, value } = await reader.read();
       if (done) {
         break;
       }
@@ -89,7 +108,6 @@ async function listen_for_notifications(
         continue;
       }
 
-      console.log("Notification", value);
       pub("rpc_notification", value);
 
       const subsystem = Object.entries(value).find(
@@ -128,21 +146,20 @@ async function connect(
   setConnectedDeviceName: Dispatch<string | undefined>,
   signal: AbortSignal
 ) {
-  let conn = await create_rpc_connection(transport, { signal });
+  const conn = await create_rpc_connection(transport, { signal });
 
-  let details = await Promise.race([
+  const details = await Promise.race([
     call_rpc(conn, { core: { getDeviceInfo: true } })
       .then((r) => r?.core?.getDeviceInfo)
       .catch((e) => {
         console.error("Failed first RPC call", e);
         return undefined;
       }),
-    valueAfter(undefined, 1000),
+    valueAfter(undefined, 1500),
   ]);
 
   if (!details) {
-    // TODO: Show a proper toast/alert not using `window.alert`
-    window.alert("Failed to connect to the chosen device");
+    toast.error("Failed to connect to the chosen device");
     return;
   }
 
@@ -158,9 +175,36 @@ async function connect(
 
   setConnectedDeviceName(details.name);
   setConn({ conn });
+  toast.success(`Connected to ${details.name}`);
 }
 
 function App() {
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    try {
+      const saved = localStorage.getItem(THEME_STORAGE_KEY);
+      if (saved === "light" || saved === "dark") return saved;
+    } catch {
+      // ignore
+    }
+    return "dark";
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "dark") {
+      root.classList.add("dark");
+      root.classList.remove("light");
+    } else {
+      root.classList.remove("dark");
+      root.classList.add("light");
+    }
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+    } catch {
+      // ignore
+    }
+  }, [theme]);
+
   const [conn, setConn] = useState<ConnectionState>({ conn: null });
   const [connectedDeviceName, setConnectedDeviceName] = useState<
     string | undefined
@@ -168,20 +212,58 @@ function App() {
   const [doIt, undo, redo, canUndo, canRedo, reset] = useUndoRedo();
   const [showAbout, setShowAbout] = useState(false);
   const [showLicenseNotice, setShowLicenseNotice] = useState(false);
+  const [showConnectModal, setShowConnectModal] = useState(false);
   const [connectionAbort, setConnectionAbort] = useState(new AbortController());
+
+  const [activeTab, setActiveTab] = useState<VmkTab>("keymap");
+  const [keymapSource, setKeymapSource] = useState<"live" | "repo">("live");
+  const [selectedEditorFile, setSelectedEditorFile] = useState<string>("config/toucan.keymap");
+  const [customPaths, setCustomPaths] = useState<Partial<VmkWorkspacePaths>>(() =>
+    loadSavedWorkspacePaths()
+  );
+  const [workspaceStatus, setWorkspaceStatus] = useState<VmkWorkspaceStatus | null>(null);
+  const [firmwareModel, setFirmwareModel] = useState<FirmwareModel | null>(null);
+  const [snapshots, setSnapshots] = useState<SnapshotSummary[]>([]);
+  const [workspaceLoading, setWorkspaceLoading] = useState(true);
 
   const [lockState, setLockState] = useState<LockState>(
     LockState.ZMK_STUDIO_CORE_LOCK_STATE_LOCKED
   );
+
+  const refreshWorkspace = useCallback(
+    async (pathsOverride?: Partial<VmkWorkspacePaths>) => {
+      const p = pathsOverride ?? customPaths;
+      try {
+        const st = await getWorkspaceStatus(p);
+        setWorkspaceStatus(st);
+        const [model, snaps] = await Promise.all([
+          st.repoExists ? getFirmwareModel(st.paths.firmwareRepoPath) : Promise.resolve(null),
+          listSnapshots(st.paths.backupsDir).catch(() => []),
+        ]);
+        setFirmwareModel(model);
+        setSnapshots(snaps);
+      } catch (e) {
+        console.warn("VMK local workspace bridge unavailable:", e);
+      } finally {
+        setWorkspaceLoading(false);
+      }
+    },
+    [customPaths]
+  );
+
+  useEffect(() => {
+    refreshWorkspace();
+  }, [refreshWorkspace]);
 
   useSub("rpc_notification.core.lockStateChanged", (ls) => {
     setLockState(ls);
   });
 
   useEffect(() => {
-    if (!conn) {
+    if (!conn.conn) {
       reset();
       setLockState(LockState.ZMK_STUDIO_CORE_LOCK_STATE_LOCKED);
+      return;
     }
 
     async function updateLockState() {
@@ -189,7 +271,7 @@ function App() {
         return;
       }
 
-      let locked_resp = await call_rpc(conn.conn, {
+      const locked_resp = await call_rpc(conn.conn, {
         core: { getLockState: true },
       });
 
@@ -200,7 +282,7 @@ function App() {
     }
 
     updateLockState();
-  }, [conn, setLockState]);
+  }, [conn.conn, reset]);
 
   const save = useCallback(() => {
     async function doSave() {
@@ -208,9 +290,11 @@ function App() {
         return;
       }
 
-      let resp = await call_rpc(conn.conn, { keymap: { saveChanges: true } });
+      const resp = await call_rpc(conn.conn, { keymap: { saveChanges: true } });
       if (!resp.keymap?.saveChanges || resp.keymap?.saveChanges.err) {
-        console.error("Failed to save changes", resp.keymap?.saveChanges);
+        toast.error("Failed to save changes to keyboard");
+      } else {
+        toast.success("Keymap saved to keyboard flash");
       }
     }
 
@@ -223,11 +307,13 @@ function App() {
         return;
       }
 
-      let resp = await call_rpc(conn.conn, {
+      const resp = await call_rpc(conn.conn, {
         keymap: { discardChanges: true },
       });
       if (!resp.keymap?.discardChanges) {
-        console.error("Failed to discard changes", resp);
+        toast.error("Failed to discard changes");
+      } else {
+        toast.info("Discarded unsaved keyboard changes");
       }
 
       reset();
@@ -235,7 +321,7 @@ function App() {
     }
 
     doDiscard();
-  }, [conn]);
+  }, [conn, reset]);
 
   const resetSettings = useCallback(() => {
     async function doReset() {
@@ -243,11 +329,13 @@ function App() {
         return;
       }
 
-      let resp = await call_rpc(conn.conn, {
+      const resp = await call_rpc(conn.conn, {
         core: { resetSettings: true },
       });
       if (!resp.core?.resetSettings) {
-        console.error("Failed to settings reset", resp);
+        toast.error("Failed to reset settings");
+      } else {
+        toast.warning("Stock settings restored");
       }
 
       reset();
@@ -255,7 +343,7 @@ function App() {
     }
 
     doReset();
-  }, [conn]);
+  }, [conn, reset]);
 
   const disconnect = useCallback(() => {
     async function doDisconnect() {
@@ -266,38 +354,53 @@ function App() {
       await conn.conn.request_writable.close();
       connectionAbort.abort("User disconnected");
       setConnectionAbort(new AbortController());
+      toast.info("Keyboard disconnected");
     }
 
     doDisconnect();
-  }, [conn]);
+  }, [conn, connectionAbort]);
 
   const onConnect = useCallback(
     (t: RpcTransport) => {
       const ac = new AbortController();
       setConnectionAbort(ac);
+      setShowConnectModal(false);
+      setActiveTab("keymap");
       connect(t, setConn, setConnectedDeviceName, ac.signal);
     },
-    [setConn, setConnectedDeviceName, setConnectedDeviceName]
+    [setConn, setConnectedDeviceName]
   );
+
+  const repoStatusLabel = workspaceStatus?.repoExists
+    ? `${workspaceStatus.gitTag || workspaceStatus.gitBranch || "repo"}@${workspaceStatus.gitHead || ""} · ${firmwareModel?.customBehaviors.length ?? 0} custom`
+    : undefined;
 
   return (
     <ConnectionContext.Provider value={conn}>
       <LockStateContext.Provider value={lockState}>
         <UndoRedoContext.Provider value={doIt}>
+          <Toaster position="bottom-right" />
           <UnlockModal />
           <ConnectModal
-            open={!conn.conn}
+            open={showConnectModal && !conn.conn}
             transports={TRANSPORTS}
             onTransportCreated={onConnect}
+            onDismiss={() => setShowConnectModal(false)}
           />
           <AboutModal open={showAbout} onClose={() => setShowAbout(false)} />
           <LicenseNoticeModal
             open={showLicenseNotice}
             onClose={() => setShowLicenseNotice(false)}
           />
-          <div className="bg-base-100 text-base-content h-full max-h-[100vh] w-full max-w-[100vw] inline-grid grid-cols-[auto] grid-rows-[auto_1fr_auto] overflow-hidden">
+          <div className="bg-background text-foreground h-full max-h-[100vh] w-full max-w-[100vw] grid grid-cols-1 grid-rows-[auto_1fr_auto] overflow-hidden">
             <AppHeader
+              activeTab={activeTab}
+              onSelectTab={setActiveTab}
+              theme={theme}
+              onChangeTheme={setTheme}
+              dirtyFileCount={workspaceStatus?.dirtyFiles.length ?? 0}
               connectedDeviceLabel={connectedDeviceName}
+              onOpenConnect={() => setShowConnectModal(true)}
               canUndo={canUndo}
               canRedo={canRedo}
               onUndo={undo}
@@ -307,8 +410,76 @@ function App() {
               onDisconnect={disconnect}
               onResetSettings={resetSettings}
             />
-            <Keyboard />
+
+            <main className="min-h-0 min-w-0 overflow-hidden bg-background">
+              {activeTab === "keymap" &&
+                (conn.conn && keymapSource === "live" ? (
+                  <Keyboard
+                    deviceName={connectedDeviceName}
+                    customBehaviors={firmwareModel?.customBehaviors}
+                    snapshots={snapshots}
+                    backupsDir={workspaceStatus?.paths.backupsDir}
+                    onSnapshotSaved={() => refreshWorkspace()}
+                    onSwitchToRepoKeymap={() => setKeymapSource("repo")}
+                  />
+                ) : (
+                  <VisualRepoKeymapEditor
+                    firmwareModel={firmwareModel}
+                    loading={workspaceLoading}
+                    snapshots={snapshots}
+                    backupsDir={workspaceStatus?.paths.backupsDir}
+                    isConnected={Boolean(conn.conn)}
+                    onModelUpdated={(nextModel) => {
+                      setFirmwareModel(nextModel);
+                      refreshWorkspace();
+                    }}
+                    onOpenConnect={() => setShowConnectModal(true)}
+                    onSwitchToLive={() => setKeymapSource("live")}
+                    onEditKeymapFile={() => {
+                      setSelectedEditorFile("config/toucan.keymap");
+                      setActiveTab("files");
+                    }}
+                  />
+                ))}
+
+              {activeTab === "tuner" && (
+                <FirmwareTunerView
+                  firmwareModel={firmwareModel}
+                  onModelUpdated={(nextModel) => {
+                    setFirmwareModel(nextModel);
+                    refreshWorkspace();
+                  }}
+                  onGoToBuild={() => setActiveTab("build")}
+                />
+              )}
+
+              {activeTab === "files" && (
+                <CustomBehaviorsAndFilesView
+                  firmwareModel={firmwareModel}
+                  initialFile={selectedEditorFile}
+                  onModelUpdated={(nextModel) => {
+                    setFirmwareModel(nextModel);
+                    refreshWorkspace();
+                  }}
+                  onRefreshModel={() => refreshWorkspace()}
+                />
+              )}
+
+              {activeTab === "build" && (
+                <BuildAndFlashView
+                  status={workspaceStatus}
+                  customPaths={customPaths}
+                  onPathsChanged={(nextPaths) => {
+                    setCustomPaths(nextPaths);
+                    refreshWorkspace(nextPaths);
+                  }}
+                  onRefreshStatus={refreshWorkspace}
+                />
+              )}
+            </main>
+
             <AppFooter
+              repoStatusLabel={repoStatusLabel}
               onShowAbout={() => setShowAbout(true)}
               onShowLicenseNotice={() => setShowLicenseNotice(true)}
             />
