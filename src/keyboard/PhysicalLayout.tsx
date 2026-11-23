@@ -9,9 +9,12 @@ import { Key } from "./Key";
 import type { BehaviorKind } from "../vmk/customBehaviors";
 import {
   isToucanSplitLayout,
-  TOUCAN_HARDWARE_CANVAS_BOTTOM,
+  TOUCAN_CANVAS_HEIGHT,
+  TOUCAN_CANVAS_WIDTH,
+  transformToucanKeyRect,
 } from "../vmk/toucanLayout";
 import {
+  ToucanCaseBackdrop,
   ToucanHardwareModules,
   type ToucanHardwareOverlayProps,
 } from "../vmk/components/ToucanHardwareModules";
@@ -135,18 +138,23 @@ export const PhysicalLayout = ({
   const showToucanHardware =
     Boolean(toucanHardware) && isToucanSplitLayout(positions);
 
-  const rightMost = positions
-    .map((k) => k.x + k.width)
-    .reduce((a, b) => Math.max(a, b), 0);
-  const keysBottomMost = positions
-    .map((k) => k.y + k.height)
-    .reduce((a, b) => Math.max(a, b), 0);
-  const bottomMost = showToucanHardware
-    ? Math.max(keysBottomMost, TOUCAN_HARDWARE_CANVAS_BOTTOM)
-    : keysBottomMost;
+  const renderedPositions = showToucanHardware
+    ? positions.map((p) => transformToucanKeyRect(p))
+    : positions;
 
-  const positionItems = positions.map((p, idx) => (
-    <div key={p.id} className="absolute hover:z-10" style={scalePosition(p, oneU)}>
+  const rightMost = showToucanHardware
+    ? TOUCAN_CANVAS_WIDTH
+    : renderedPositions
+        .map((k) => k.x + k.width)
+        .reduce((a, b) => Math.max(a, b), 0);
+  const bottomMost = showToucanHardware
+    ? TOUCAN_CANVAS_HEIGHT
+    : renderedPositions
+        .map((k) => k.y + k.height)
+        .reduce((a, b) => Math.max(a, b), 0);
+
+  const positionItems = renderedPositions.map((p, idx) => (
+    <div key={p.id} className="absolute z-10 hover:z-30" style={scalePosition(p, oneU)}>
       <Key
         oneU={oneU}
         selected={idx === selectedPosition}
@@ -175,6 +183,7 @@ export const PhysicalLayout = ({
       }}
       ref={ref}
     >
+      {showToucanHardware && <ToucanCaseBackdrop oneU={oneU} />}
       {positionItems}
       {showToucanHardware && toucanHardware && (
         <ToucanHardwareModules oneU={oneU} {...toucanHardware} />

@@ -2,7 +2,13 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { auditEndpointSwapBindings } from "../endpointAudit";
-import { isToucanSplitLayout } from "../toucanLayout";
+import {
+  isToucanSplitLayout,
+  TOUCAN_CANVAS_PAD_X,
+  TOUCAN_CANVAS_PAD_Y,
+  TOUCAN_RIGHT_HALF_SHIFT_U,
+  transformToucanKeyRect,
+} from "../toucanLayout";
 import { parseKeymapLayers } from "../dtsParser";
 import type { RepoKeymapLayer } from "../types";
 
@@ -82,6 +88,14 @@ describe("Toucan 2 endpoint swap audit & hardware canvas detection", () => {
 
     expect(isToucanSplitLayout(toucanKeys)).toBe(true);
     expect(isToucanSplitLayout(toucanKeys.slice(0, 36))).toBe(false);
+
+    // Verify transformToucanKeyRect shifts only the right half to fit LCD + tilted TPS43 trackpad
+    const leftT = transformToucanKeyRect({ x: 5, y: 0.24, width: 1, height: 1 });
+    const rightY = transformToucanKeyRect({ x: 8, y: 0.24, width: 1, height: 1 });
+    expect(leftT.x).toBeCloseTo(5 + TOUCAN_CANVAS_PAD_X, 5);
+    expect(leftT.y).toBeCloseTo(0.24 + TOUCAN_CANVAS_PAD_Y, 5);
+    expect(rightY.x).toBeCloseTo(8 + TOUCAN_CANVAS_PAD_X + TOUCAN_RIGHT_HALF_SHIFT_U, 5);
+    expect(rightY.x - (leftT.x + 1)).toBeGreaterThan(5.0);
     expect(
       isToucanSplitLayout(
         Array.from({ length: 42 }, (_, i) => ({
