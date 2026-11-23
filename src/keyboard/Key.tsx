@@ -65,7 +65,7 @@ export const Key = ({
     <button
       type="button"
       title={tooltip}
-      className={`group rounded-[9px] relative flex flex-col justify-center items-center cursor-pointer transition-all duration-150 hover:-translate-y-[1px] overflow-hidden px-1 select-none ${stateClass} ${diffRing}`}
+      className={`group rounded-[7px] relative flex flex-col justify-center items-center cursor-pointer transition-all duration-150 hover:-translate-y-[1px] overflow-hidden px-2 py-1 select-none ${stateClass} ${diffRing}`}
       style={{
         width: `${pixelWidth}px`,
         height: `${pixelHeight}px`,
@@ -98,7 +98,7 @@ export const Key = ({
 
       {header && (
         <div
-          className={`absolute text-keycap-xs tracking-wider uppercase top-1 text-nowrap left-1/2 font-mono -translate-x-1/2 text-center ${
+          className={`absolute text-[8px] leading-none tracking-wider uppercase top-[4px] text-nowrap left-1/2 font-mono -translate-x-1/2 text-center max-w-[calc(100%-10px)] truncate ${
             selected ? "text-white/80" : "text-muted-foreground"
           }`}
         >
@@ -106,13 +106,17 @@ export const Key = ({
         </div>
       )}
 
-      <div className="flex flex-col items-center justify-center max-w-full leading-tight font-medium">
+      <div
+        className={`flex flex-col items-center justify-center max-w-full leading-none font-medium ${
+          header ? "mt-1.5" : ""
+        } ${secondaryLabel ? "mb-1.5" : ""}`}
+      >
         {children}
       </div>
 
       {secondaryLabel && (
         <div
-          className={`absolute bottom-1 left-1/2 -translate-x-1/2 text-keycap-xs font-mono text-nowrap ${
+          className={`absolute bottom-[4px] left-1/2 -translate-x-1/2 text-[8px] leading-none font-mono text-nowrap max-w-[calc(100%-10px)] truncate ${
             selected ? "text-white/85" : "text-[#FC4C01]"
           }`}
         >

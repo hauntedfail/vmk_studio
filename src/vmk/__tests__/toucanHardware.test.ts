@@ -6,10 +6,12 @@ import {
   isToucanSplitLayout,
   TOUCAN_CANVAS_PAD_X,
   TOUCAN_CANVAS_PAD_Y,
+  TOUCAN_CHOC_Y_SCALE,
   TOUCAN_RIGHT_HALF_SHIFT_U,
   transformToucanKeyRect,
 } from "../toucanLayout";
 import { parseKeymapLayers } from "../dtsParser";
+import { formatZmkKeycapLegend } from "../zmkKeycodes";
 import type { RepoKeymapLayer } from "../types";
 
 describe("Toucan 2 endpoint swap audit & hardware canvas detection", () => {
@@ -89,13 +91,26 @@ describe("Toucan 2 endpoint swap audit & hardware canvas detection", () => {
     expect(isToucanSplitLayout(toucanKeys)).toBe(true);
     expect(isToucanSplitLayout(toucanKeys.slice(0, 36))).toBe(false);
 
-    // Verify transformToucanKeyRect shifts only the right half to fit LCD + tilted TPS43 trackpad
-    const leftT = transformToucanKeyRect({ x: 5, y: 0.24, width: 1, height: 1 });
-    const rightY = transformToucanKeyRect({ x: 8, y: 0.24, width: 1, height: 1 });
+    // Verify transformToucanKeyRect shifts only the right half and mirrors thumb clusters cleanly
+    const leftT = transformToucanKeyRect({ x: 5, y: 0.24, width: 1, height: 1 }, 5);
+    const rightY = transformToucanKeyRect({ x: 8, y: 0.24, width: 1, height: 1 }, 6);
     expect(leftT.x).toBeCloseTo(5 + TOUCAN_CANVAS_PAD_X, 5);
-    expect(leftT.y).toBeCloseTo(0.24 + TOUCAN_CANVAS_PAD_Y, 5);
+    expect(leftT.y).toBeCloseTo(0.24 * TOUCAN_CHOC_Y_SCALE + TOUCAN_CANVAS_PAD_Y, 5);
+    expect(leftT.height).toBeCloseTo(TOUCAN_CHOC_Y_SCALE, 5);
     expect(rightY.x).toBeCloseTo(8 + TOUCAN_CANVAS_PAD_X + TOUCAN_RIGHT_HALF_SHIFT_U, 5);
     expect(rightY.x - (leftT.x + 1)).toBeGreaterThan(5.0);
+
+    const leftSpace = transformToucanKeyRect(
+      { x: 5.48, y: 3.28, width: 1, height: 1, r: 24, rx: 5.48, ry: 4.33 },
+      38
+    );
+    const rightRet = transformToucanKeyRect(
+      { x: 7.52, y: 3.28, width: 1, height: 1, r: -24, rx: 8.52, ry: 4.33 },
+      39
+    );
+    expect(leftSpace.r).toBe(27);
+    expect(rightRet.r).toBe(-27);
+    expect(leftSpace.ry).toBeCloseTo(rightRet.ry, 5);
     expect(
       isToucanSplitLayout(
         Array.from({ length: 42 }, (_, i) => ({
@@ -135,5 +150,25 @@ describe("Toucan 2 endpoint swap audit & hardware canvas detection", () => {
       })
     );
     expect(isToucanSplitLayout(layout)).toBe(true);
+  });
+
+  it("formats ZMK keycode expressions into concise keycap symbols with breathing room", () => {
+    expect(formatZmkKeycapLegend("COMMA")).toBe(",");
+    expect(formatZmkKeycapLegend("DOT")).toBe(".");
+    expect(formatZmkKeycapLegend("SEMI")).toBe(";");
+    expect(formatZmkKeycapLegend("SQT")).toBe("'");
+    expect(formatZmkKeycapLegend("FSLH")).toBe("/");
+    expect(formatZmkKeycapLegend("LCTRL")).toBe("⌃");
+    expect(formatZmkKeycapLegend("LSHFT")).toBe("⇧");
+    expect(formatZmkKeycapLegend("LGUI")).toBe("⌘");
+    expect(formatZmkKeycapLegend("RALT")).toBe("⌥");
+    expect(formatZmkKeycapLegend("TAB")).toBe("⇥");
+    expect(formatZmkKeycapLegend("BSPC")).toBe("⌫");
+    expect(formatZmkKeycapLegend("RET")).toBe("↵");
+    expect(formatZmkKeycapLegend("ESC")).toBe("⎋");
+    expect(formatZmkKeycapLegend("SPACE")).toBe("␣");
+    expect(formatZmkKeycapLegend("N5")).toBe("5");
+    expect(formatZmkKeycapLegend("LC(LG(UP))")).toBe("⌃⌘↑");
+    expect(formatZmkKeycapLegend("LG(EQUAL)")).toBe("⌘=");
   });
 });

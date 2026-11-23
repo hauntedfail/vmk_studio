@@ -139,7 +139,7 @@ export const PhysicalLayout = ({
     Boolean(toucanHardware) && isToucanSplitLayout(positions);
 
   const renderedPositions = showToucanHardware
-    ? positions.map((p) => transformToucanKeyRect(p))
+    ? positions.map((p, idx) => transformToucanKeyRect(p, idx))
     : positions;
 
   const rightMost = showToucanHardware

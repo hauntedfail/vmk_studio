@@ -1,7 +1,10 @@
 import type { FirmwareModel } from "../types";
 import {
+  TOUCAN_CANVAS_HEIGHT,
   TOUCAN_CANVAS_PAD_X,
   TOUCAN_CANVAS_PAD_Y,
+  TOUCAN_CANVAS_WIDTH,
+  TOUCAN_CHOC_Y_SCALE,
   TOUCAN_RIGHT_HALF_SHIFT_U,
 } from "../toucanLayout";
 
@@ -388,123 +391,87 @@ export function ToucanCaseBackdrop({ oneU }: { oneU: number }) {
   const px = TOUCAN_CANVAS_PAD_X;
   const py = TOUCAN_CANVAS_PAD_Y;
   const rs = TOUCAN_RIGHT_HALF_SHIFT_U;
+  const ys = TOUCAN_CHOC_Y_SCALE;
 
-  const W = (14.0 + rs + px * 2) * oneU;
-  const H = (4.95 + py) * oneU;
+  const W = TOUCAN_CANVAS_WIDTH * oneU;
+  const H = TOUCAN_CANVAS_HEIGHT * oneU;
   const u = (val: number) => val * oneU;
+  const uy = (val: number) => (py + val * ys) * oneU;
+  const rxOrigin = px + rs;
 
-  // Left half outer shell (in keycap units, offset by px, py)
-  const leftOuterPath = [
-    `M ${u(px - 0.14)} ${u(py + 0.24)}`,
-    `Q ${u(px - 0.14)} ${u(py + 0.06)} ${u(px + 0.04)} ${u(py + 0.06)}`,
-    `L ${u(px + 2.86)} ${u(py + 0.06)}`,
-    `L ${u(px + 2.94)} ${u(py - 0.12)}`,
-    `L ${u(px + 4.06)} ${u(py - 0.12)}`,
-    `L ${u(px + 4.14)} ${u(py + 0.08)}`,
-    `L ${u(px + 7.38)} ${u(py + 0.08)}`,
-    `Q ${u(px + 7.56)} ${u(py + 0.08)} ${u(px + 7.56)} ${u(py + 0.26)}`,
-    `L ${u(px + 7.56)} ${u(py + 3.68)}`,
-    `Q ${u(px + 7.56)} ${u(py + 3.86)} ${u(px + 7.42)} ${u(py + 4.00)}`,
-    `L ${u(px + 6.62)} ${u(py + 4.80)}`,
-    `Q ${u(px + 6.46)} ${u(py + 4.94)} ${u(px + 6.24)} ${u(py + 4.86)}`,
-    `L ${u(px + 5.34)} ${u(py + 4.46)}`,
-    `L ${u(px + 4.46)} ${u(py + 4.26)}`,
-    `L ${u(px + 3.52)} ${u(py + 4.26)}`,
-    `Q ${u(px + 3.16)} ${u(py + 4.26)} ${u(px + 2.84)} ${u(py + 3.96)}`,
-    `Q ${u(px + 2.52)} ${u(py + 3.66)} ${u(px + 2.10)} ${u(py + 3.66)}`,
-    `L ${u(px + 0.04)} ${u(py + 3.66)}`,
-    `Q ${u(px - 0.14)} ${u(py + 3.66)} ${u(px - 0.14)} ${u(py + 3.48)}`,
-    `Z`,
-  ].join(" ");
+  // Helpers to build mathematically exact mirrored Left & Right paths with Choc Y scaling
+  const L = (x: number, y: number) => `${u(px + x)} ${uy(y)}`;
+  const R = (x: number, y: number) => `${u(rxOrigin + (14.0 - x))} ${uy(y)}`;
 
-  // Left half anodized silver aluminum switch plate inset
-  const leftPlatePath = [
-    `M ${u(px - 0.04)} ${u(py + 0.34)}`,
-    `L ${u(px + 2.02)} ${u(py + 0.34)}`,
-    `L ${u(px + 2.02)} ${u(py + 0.14)}`,
-    `L ${u(px + 2.98)} ${u(py + 0.14)}`,
-    `L ${u(px + 2.98)} ${u(py - 0.04)}`,
-    `L ${u(px + 4.02)} ${u(py - 0.04)}`,
-    `L ${u(px + 4.02)} ${u(py + 0.14)}`,
-    `L ${u(px + 6.08)} ${u(py + 0.14)}`,
-    `L ${u(px + 6.08)} ${u(py + 3.24)}`,
-    `L ${u(px + 7.22)} ${u(py + 3.74)}`,
-    `L ${u(px + 6.46)} ${u(py + 4.74)}`,
-    `L ${u(px + 5.38)} ${u(py + 4.36)}`,
-    `L ${u(px + 4.46)} ${u(py + 4.16)}`,
-    `L ${u(px + 3.48)} ${u(py + 4.16)}`,
-    `Q ${u(px + 3.14)} ${u(py + 4.16)} ${u(px + 2.86)} ${u(py + 3.88)}`,
-    `Q ${u(px + 2.58)} ${u(py + 3.56)} ${u(px + 2.12)} ${u(py + 3.56)}`,
-    `L ${u(px + 0.02)} ${u(py + 3.56)}`,
-    `Q ${u(px - 0.04)} ${u(py + 3.56)} ${u(px - 0.04)} ${u(py + 3.46)}`,
-    `Z`,
-  ].join(" ");
+  const buildOuterPath = (pt: (x: number, y: number) => string) =>
+    [
+      `M ${pt(-0.14, 0.24)}`,
+      `Q ${pt(-0.14, 0.06)} ${pt(0.04, 0.06)}`,
+      `L ${pt(2.86, 0.06)}`,
+      `L ${pt(2.94, -0.10)}`,
+      `L ${pt(4.06, -0.10)}`,
+      `L ${pt(4.14, 0.08)}`,
+      `L ${pt(7.40, 0.08)}`,
+      `Q ${pt(7.58, 0.08)} ${pt(7.58, 0.26)}`,
+      `L ${pt(7.58, 3.92)}`,
+      `Q ${pt(7.58, 4.10)} ${pt(7.48, 4.26)}`,
+      `L ${pt(6.98, 5.04)}`,
+      `Q ${pt(6.84, 5.22)} ${pt(6.62, 5.10)}`,
+      `L ${pt(5.76, 4.66)}`,
+      `Q ${pt(4.80, 4.44)} ${pt(3.84, 4.50)}`,
+      `Q ${pt(3.44, 4.52)} ${pt(3.14, 4.16)}`,
+      `Q ${pt(2.84, 3.78)} ${pt(2.38, 3.68)}`,
+      `L ${pt(0.04, 3.68)}`,
+      `Q ${pt(-0.14, 3.68)} ${pt(-0.14, 3.50)}`,
+      `Z`,
+    ].join(" ");
 
-  // Right half mirrored coordinates (mirror axis across center of full width)
-  const totalU = 14.0 + rs + px * 2;
-  const rxOrigin = px + rs; // right-half raw x=0 maps to rxOrigin
+  const buildPlatePath = (pt: (x: number, y: number) => string) =>
+    [
+      `M ${pt(-0.04, 0.34)}`,
+      `L ${pt(2.02, 0.34)}`,
+      `L ${pt(2.02, 0.14)}`,
+      `L ${pt(2.98, 0.14)}`,
+      `L ${pt(2.98, -0.02)}`,
+      `L ${pt(4.02, -0.02)}`,
+      `L ${pt(4.02, 0.14)}`,
+      `L ${pt(7.36, 0.14)}`,
+      `Q ${pt(7.46, 0.14)} ${pt(7.46, 0.24)}`,
+      `L ${pt(7.46, 3.90)}`,
+      `Q ${pt(7.46, 4.04)} ${pt(7.36, 4.20)}`,
+      `L ${pt(6.90, 4.92)}`,
+      `Q ${pt(6.78, 5.06)} ${pt(6.60, 4.96)}`,
+      `L ${pt(5.78, 4.54)}`,
+      `Q ${pt(4.80, 4.32)} ${pt(3.84, 4.38)}`,
+      `Q ${pt(3.48, 4.40)} ${pt(3.22, 4.06)}`,
+      `Q ${pt(2.92, 3.68)} ${pt(2.42, 3.56)}`,
+      `L ${pt(0.04, 3.56)}`,
+      `Q ${pt(-0.04, 3.56)} ${pt(-0.04, 3.46)}`,
+      `Z`,
+    ].join(" ");
 
-  const rightOuterPath = [
-    `M ${u(rxOrigin + 14.14)} ${u(py + 0.24)}`,
-    `Q ${u(rxOrigin + 14.14)} ${u(py + 0.06)} ${u(rxOrigin + 13.96)} ${u(py + 0.06)}`,
-    `L ${u(rxOrigin + 11.14)} ${u(py + 0.06)}`,
-    `L ${u(rxOrigin + 11.06)} ${u(py - 0.12)}`,
-    `L ${u(rxOrigin + 9.94)} ${u(py - 0.12)}`,
-    `L ${u(rxOrigin + 9.86)} ${u(py + 0.08)}`,
-    `L ${u(rxOrigin + 6.62)} ${u(py + 0.08)}`,
-    `Q ${u(rxOrigin + 6.44)} ${u(py + 0.08)} ${u(rxOrigin + 6.44)} ${u(py + 0.26)}`,
-    `L ${u(rxOrigin + 6.44)} ${u(py + 3.68)}`,
-    `Q ${u(rxOrigin + 6.44)} ${u(py + 3.86)} ${u(rxOrigin + 6.58)} ${u(py + 4.00)}`,
-    `L ${u(rxOrigin + 7.38)} ${u(py + 4.80)}`,
-    `Q ${u(rxOrigin + 7.54)} ${u(py + 4.94)} ${u(rxOrigin + 7.76)} ${u(py + 4.86)}`,
-    `L ${u(rxOrigin + 8.66)} ${u(py + 4.46)}`,
-    `L ${u(rxOrigin + 9.54)} ${u(py + 4.26)}`,
-    `L ${u(rxOrigin + 10.48)} ${u(py + 4.26)}`,
-    `Q ${u(rxOrigin + 10.84)} ${u(py + 4.26)} ${u(rxOrigin + 11.16)} ${u(py + 3.96)}`,
-    `Q ${u(rxOrigin + 11.48)} ${u(py + 3.66)} ${u(rxOrigin + 11.90)} ${u(py + 3.66)}`,
-    `L ${u(rxOrigin + 13.96)} ${u(py + 3.66)}`,
-    `Q ${u(rxOrigin + 14.14)} ${u(py + 3.66)} ${u(rxOrigin + 14.14)} ${u(py + 3.48)}`,
-    `Z`,
-  ].join(" ");
+  const leftOuterPath = buildOuterPath(L);
+  const leftPlatePath = buildPlatePath(L);
+  const rightOuterPath = buildOuterPath(R);
+  const rightPlatePath = buildPlatePath(R);
 
-  const rightPlatePath = [
-    `M ${u(rxOrigin + 14.04)} ${u(py + 0.34)}`,
-    `L ${u(rxOrigin + 11.98)} ${u(py + 0.34)}`,
-    `L ${u(rxOrigin + 11.98)} ${u(py + 0.14)}`,
-    `L ${u(rxOrigin + 11.02)} ${u(py + 0.14)}`,
-    `L ${u(rxOrigin + 11.02)} ${u(py - 0.04)}`,
-    `L ${u(rxOrigin + 9.98)} ${u(py - 0.04)}`,
-    `L ${u(rxOrigin + 9.98)} ${u(py + 0.14)}`,
-    `L ${u(rxOrigin + 7.92)} ${u(py + 0.14)}`,
-    `L ${u(rxOrigin + 7.92)} ${u(py + 3.24)}`,
-    `L ${u(rxOrigin + 6.78)} ${u(py + 3.74)}`,
-    `L ${u(rxOrigin + 7.54)} ${u(py + 4.74)}`,
-    `L ${u(rxOrigin + 8.62)} ${u(py + 4.36)}`,
-    `L ${u(rxOrigin + 9.54)} ${u(py + 4.16)}`,
-    `L ${u(rxOrigin + 10.52)} ${u(py + 4.16)}`,
-    `Q ${u(rxOrigin + 10.86)} ${u(py + 4.16)} ${u(rxOrigin + 11.14)} ${u(py + 3.88)}`,
-    `Q ${u(rxOrigin + 11.42)} ${u(py + 3.56)} ${u(rxOrigin + 11.88)} ${u(py + 3.56)}`,
-    `L ${u(rxOrigin + 13.98)} ${u(py + 3.56)}`,
-    `Q ${u(rxOrigin + 14.04)} ${u(py + 3.56)} ${u(rxOrigin + 14.04)} ${u(py + 3.46)}`,
-    `Z`,
-  ].join(" ");
-
-  // Right-half vertical matte-black acrylic controller cover (behind protruding trackpad)
+  // Right-half vertical matte-black acrylic controller cover (exact mirror of left LCD cover)
   const rightAcrylicCover = [
-    `M ${u(rxOrigin + 6.56)} ${u(py + 0.24)}`,
-    `Q ${u(rxOrigin + 6.56)} ${u(py + 0.16)} ${u(rxOrigin + 6.64)} ${u(py + 0.16)}`,
-    `L ${u(rxOrigin + 7.82)} ${u(py + 0.16)}`,
-    `Q ${u(rxOrigin + 7.90)} ${u(py + 0.16)} ${u(rxOrigin + 7.90)} ${u(py + 0.24)}`,
-    `L ${u(rxOrigin + 7.90)} ${u(py + 3.12)}`,
-    `L ${u(rxOrigin + 6.64)} ${u(py + 3.68)}`,
-    `Q ${u(rxOrigin + 6.56)} ${u(py + 3.71)} ${u(rxOrigin + 6.56)} ${u(py + 3.62)}`,
+    `M ${R(6.08, 0.24)}`,
+    `Q ${R(6.08, 0.16)} ${R(6.16, 0.16)}`,
+    `L ${R(7.38, 0.16)}`,
+    `Q ${R(7.46, 0.16)} ${R(7.46, 0.24)}`,
+    `L ${R(7.46, 3.94)}`,
+    `Q ${R(7.46, 4.02)} ${R(7.38, 3.98)}`,
+    `L ${R(6.14, 3.38)}`,
+    `Q ${R(6.08, 3.35)} ${R(6.08, 3.28)}`,
     `Z`,
   ].join(" ");
 
   // Trackpad 3D-printed ear cradle beneath the angled TPS43 pad
-  const tpCx = u(rxOrigin + 6.32);
-  const tpCy = u(py + 2.60);
-  const tpEarW = u(2.30);
+  const tpCx = u(rxOrigin + 6.26);
+  const tpCy = uy(2.58);
+  const tpEarW = u(2.38);
   const tpEarH = u(2.24);
 
   return (
@@ -517,9 +484,9 @@ export function ToucanCaseBackdrop({ oneU }: { oneU: number }) {
     >
       <defs>
         <linearGradient id="toucan-alu-plate" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#dce0e4" />
-          <stop offset="48%" stopColor="#c7ccd1" />
-          <stop offset="100%" stopColor="#aeb4bb" />
+          <stop offset="0%" stopColor="#e2e5e9" />
+          <stop offset="48%" stopColor="#ccd1d6" />
+          <stop offset="100%" stopColor="#b2b8bf" />
         </linearGradient>
         <linearGradient id="toucan-shell" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#26272b" />
@@ -551,22 +518,22 @@ export function ToucanCaseBackdrop({ oneU }: { oneU: number }) {
         {/* Left Top-Outer Pinky Blocker Strip (2 M2 screws) */}
         <rect
           x={u(px - 0.04)}
-          y={u(py + 0.12)}
+          y={uy(0.12)}
           width={u(1.98)}
-          height={u(0.24)}
+          height={u(0.24 * ys)}
           rx={u(0.05)}
           fill="url(#toucan-acrylic-matte)"
           stroke="rgba(255,255,255,0.08)"
           strokeWidth="0.8"
         />
-        <circle cx={u(px + 0.14)} cy={u(py + 0.24)} r={u(0.045)} fill="#52555d" />
-        <circle cx={u(px + 1.78)} cy={u(py + 0.24)} r={u(0.045)} fill="#52555d" />
+        <circle cx={u(px + 0.14)} cy={uy(0.24)} r={u(0.045)} fill="#52555d" />
+        <circle cx={u(px + 1.78)} cy={uy(0.24)} r={u(0.045)} fill="#52555d" />
       </g>
 
       {/* Right Half Case + Trackpad Ear Cradle + Anodized Silver Switch Plate */}
       <g filter="url(#toucan-case-shadow)">
         {/* Integrated 3D-printed angled ear for TPS43 trackpad */}
-        <g transform={`rotate(-25 ${tpCx} ${tpCy})`}>
+        <g transform={`rotate(-24.5 ${tpCx} ${tpCy})`}>
           <rect
             x={tpCx - tpEarW / 2}
             y={tpCy - tpEarH / 2}
@@ -598,26 +565,23 @@ export function ToucanCaseBackdrop({ oneU }: { oneU: number }) {
           strokeWidth="0.9"
         />
         {/* M2 screw heads on right inner cover */}
-        <circle cx={u(rxOrigin + 7.72)} cy={u(py + 0.30)} r={u(0.045)} fill="#5c6068" />
-        <circle cx={u(rxOrigin + 7.72)} cy={u(py + 3.00)} r={u(0.045)} fill="#5c6068" />
+        <circle cx={u(rxOrigin + 7.72)} cy={uy(0.30)} r={u(0.045)} fill="#5c6068" />
+        <circle cx={u(rxOrigin + 7.74)} cy={uy(3.26)} r={u(0.045)} fill="#5c6068" />
 
         {/* Right Top-Outer Pinky Blocker Strip (2 M2 screws) */}
         <rect
           x={u(rxOrigin + 12.06)}
-          y={u(py + 0.12)}
+          y={uy(0.12)}
           width={u(1.98)}
-          height={u(0.24)}
+          height={u(0.24 * ys)}
           rx={u(0.05)}
           fill="url(#toucan-acrylic-matte)"
           stroke="rgba(255,255,255,0.08)"
           strokeWidth="0.8"
         />
-        <circle cx={u(rxOrigin + 12.24)} cy={u(py + 0.24)} r={u(0.045)} fill="#52555d" />
-        <circle cx={u(rxOrigin + 13.86)} cy={u(py + 0.24)} r={u(0.045)} fill="#52555d" />
+        <circle cx={u(rxOrigin + 12.24)} cy={uy(0.24)} r={u(0.045)} fill="#52555d" />
+        <circle cx={u(rxOrigin + 13.86)} cy={uy(0.24)} r={u(0.045)} fill="#52555d" />
       </g>
-
-      {/* Keep totalU referenced cleanly */}
-      <rect x="0" y="0" width={u(totalU)} height="0" fill="none" />
     </svg>
   );
 }
@@ -637,6 +601,7 @@ export function ToucanHardwareModules({
   const px = TOUCAN_CANVAS_PAD_X;
   const py = TOUCAN_CANVAS_PAD_Y;
   const rs = TOUCAN_RIGHT_HALF_SHIFT_U;
+  const ys = TOUCAN_CHOC_Y_SCALE;
   const rxOrigin = px + rs;
 
   const statusStyle = firmwareModel?.conf.statusScreenStyle ?? 2;
@@ -651,32 +616,33 @@ export function ToucanHardwareModules({
   const lcdSelected = selectedModule === "lcd";
   const tpSelected = selectedModule === "trackpad";
 
-  // Left inner glossy-black acrylic display cover: x = 6.10..7.44, y = 0.16..3.70 (1.34u x 3.54u)
+  // Left inner glossy-black acrylic display cover: x = 6.08..7.46, y = 0.16..3.98 (Choc Y-scaled)
+  // Chamfered cleanly along the +27° angle of Left Thumb 2 (SPACE) with crisp silver clearance
   const lcdCoverStyle = {
-    left: (px + 6.10) * oneU,
-    top: (py + 0.16) * oneU,
-    width: 1.34 * oneU,
-    height: 3.54 * oneU,
+    left: (px + 6.08) * oneU,
+    top: (py + 0.16 * ys) * oneU,
+    width: 1.38 * oneU,
+    height: 3.82 * ys * oneU,
     clipPath: "polygon(0% 0%, 100% 0%, 100% 100%, 0% 84%)",
   };
 
   // Active Sharp Memory LCD window inside cover: 1.14u x 1.33u (exact 144:168 ratio), beside T/G
   const lcdWindowStyle = {
-    left: 0.10 * oneU,
-    top: 0.66 * oneU,
+    left: 0.12 * oneU,
+    top: 0.70 * ys * oneU,
     width: 1.14 * oneU,
     height: 1.33 * oneU,
   };
 
-  // Right protruding Azoteq TPS43 matte-glass trackpad: centered at (rxOrigin + 6.32, py + 2.60), -25°
-  const tpW = 2.10 * oneU;
-  const tpH = 2.02 * oneU;
+  // Right protruding Azoteq TPS43 matte-glass trackpad (43x40mm real ratio): -24.5°
+  const tpW = 2.18 * oneU;
+  const tpH = 2.04 * oneU;
   const tpStyle = {
-    left: (rxOrigin + 6.32) * oneU - tpW / 2,
-    top: (py + 2.60) * oneU - tpH / 2,
+    left: (rxOrigin + 6.26) * oneU - tpW / 2,
+    top: (py + 2.58 * ys) * oneU - tpH / 2,
     width: tpW,
     height: tpH,
-    transform: "rotate(-25deg)",
+    transform: "rotate(-24.5deg)",
   };
 
   return (
@@ -714,7 +680,7 @@ export function ToucanHardwareModules({
               "linear-gradient(125deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.02) 28%, transparent 52%, rgba(255,255,255,0.05) 100%)",
           }}
         />
-        {/* M2 screw dots matching Toucan 2 glossy cover */}
+        {/* 3 M2 screw dots matching Toucan 2 glossy cover */}
         <span
           className="pointer-events-none absolute rounded-full bg-zinc-500/80 border border-black/60"
           style={{
@@ -729,8 +695,17 @@ export function ToucanHardwareModules({
           style={{
             width: 0.09 * oneU,
             height: 0.09 * oneU,
+            left: 0.14 * oneU,
+            top: 2.94 * ys * oneU,
+          }}
+        />
+        <span
+          className="pointer-events-none absolute rounded-full bg-zinc-500/80 border border-black/60"
+          style={{
+            width: 0.09 * oneU,
+            height: 0.09 * oneU,
             right: 0.14 * oneU,
-            bottom: 0.30 * oneU,
+            bottom: 0.24 * oneU,
           }}
         />
 
@@ -756,7 +731,7 @@ export function ToucanHardwareModules({
             lcdSelected ? "opacity-100 text-[#FC4C01]" : "opacity-0 group-hover:opacity-90 text-zinc-300"
           }`}
           style={{
-            top: 2.16 * oneU,
+            top: 2.34 * oneU,
             fontSize: Math.max(7, Math.round(0.14 * oneU)),
           }}
         >

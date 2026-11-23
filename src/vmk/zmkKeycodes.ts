@@ -133,3 +133,124 @@ export function unwrapZmkMods(expr: string): { mods: string[]; base: string } {
 export function wrapZmkMods(base: string, mods: string[]): string {
   return mods.reduceRight((acc, mod) => `${mod}(${acc})`, base.trim());
 }
+
+const MOD_GLYPHS: Record<string, string> = {
+  LC: "⌃",
+  RC: "⌃",
+  LS: "⇧",
+  RS: "⇧",
+  LA: "⌥",
+  RA: "⌥",
+  LG: "⌘",
+  RG: "⌘",
+};
+
+const KEYCAP_LEGEND_MAP: Record<string, string> = {
+  // Modifiers (Apple / MBK minimal symbols)
+  LCTRL: "⌃",
+  RCTRL: "⌃",
+  LSHFT: "⇧",
+  LSHIFT: "⇧",
+  RSHFT: "⇧",
+  RSHIFT: "⇧",
+  LALT: "⌥",
+  RALT: "⌥",
+  LGUI: "⌘",
+  LCMD: "⌘",
+  LWIN: "⌘",
+  RGUI: "⌘",
+  RCMD: "⌘",
+  RWIN: "⌘",
+  // Editing & control
+  TAB: "⇥",
+  BSPC: "⌫",
+  BACKSPACE: "⌫",
+  DEL: "⌦",
+  DELETE: "⌦",
+  RET: "↵",
+  ENTER: "↵",
+  RETURN: "↵",
+  ESC: "⎋",
+  ESCAPE: "⎋",
+  SPACE: "␣",
+  CAPS: "⇪",
+  CAPSLOCK: "⇪",
+  // Navigation
+  LEFT: "←",
+  DOWN: "↓",
+  UP: "↑",
+  RIGHT: "→",
+  HOME: "↖",
+  END: "↘",
+  PG_UP: "⇞",
+  PG_DN: "⇟",
+  // Punctuation & symbols
+  COMMA: ",",
+  DOT: ".",
+  SEMI: ";",
+  SQT: "'",
+  FSLH: "/",
+  BSLH: "\\",
+  MINUS: "-",
+  EQUAL: "=",
+  LBKT: "[",
+  RBKT: "]",
+  GRAVE: "`",
+  EXCL: "!",
+  AT: "@",
+  HASH: "#",
+  DLLR: "$",
+  PRCNT: "%",
+  CARET: "^",
+  AMPS: "&",
+  STAR: "*",
+  ASTRK: "*",
+  KP_MULTIPLY: "*",
+  LPAR: "(",
+  RPAR: ")",
+  UNDER: "_",
+  PLUS: "+",
+  LBRC: "{",
+  RBRC: "}",
+  PIPE: "|",
+  TILDE: "~",
+  LT: "<",
+  GT: ">",
+  QMARK: "?",
+  COLON: ":",
+  DQT: '"',
+  // Numbers
+  N0: "0",
+  N1: "1",
+  N2: "2",
+  N3: "3",
+  N4: "4",
+  N5: "5",
+  N6: "6",
+  N7: "7",
+  N8: "8",
+  N9: "9",
+  // Media
+  C_VOL_UP: "Vol+",
+  C_VOL_DN: "Vol-",
+  C_MUTE: "Mute",
+  C_PP: "⏯",
+  C_NEXT: "⏭",
+  C_PREV: "⏮",
+  C_BRI_UP: "Bri+",
+  C_BRI_DN: "Bri-",
+};
+
+/**
+ * Formats a ZMK keycode expression (including wrapped modifiers like LC(LG(UP)))
+ * into a clean, compact keycap legend with ample optical breathing room.
+ */
+export function formatZmkKeycapLegend(expr: string): string {
+  const trimmed = expr.trim();
+  if (!trimmed) return "";
+  const { mods, base } = unwrapZmkMods(trimmed);
+  const baseLabel = KEYCAP_LEGEND_MAP[base] ?? base;
+  if (mods.length === 0) return baseLabel;
+  const modPrefix = mods.map((m) => MOD_GLYPHS[m] ?? m).join("");
+  return `${modPrefix}${baseLabel}`;
+}

@@ -9,6 +9,7 @@ import {
   ALL_ZMK_KEYCODES,
   ZMK_KEYCODE_GROUPS,
   ZMK_MOD_WRAPPERS,
+  formatZmkKeycapLegend,
   unwrapZmkMods,
   wrapZmkMods,
 } from "../zmkKeycodes";
@@ -544,29 +545,42 @@ export const VisualRepoKeymapEditor = ({
       } else if (parsed.behavior === "&trans") {
         primary = "▽";
       } else if (parsed.behavior === "&none") {
-        primary = "✕";
+        primary = "·";
       } else if (parsed.behavior === "&studio_unlock") {
-        primary = "Studio Unlock";
+        primary = "Unlock";
       } else if (parsed.behavior === "&bootloader") {
         primary = "Boot";
       } else if (parsed.behavior === "&sys_reset") {
         primary = "Reset";
       } else if (parsed.behavior === "&kp") {
-        primary = parsed.params.join(" ") || "?";
+        primary = formatZmkKeycapLegend(parsed.params.join(" ")) || "?";
       } else if (parsed.behavior === "&mt") {
         header = "MT";
-        primary = parsed.params[1] || "?";
-        secondaryLabel = parsed.params[0] ? `H:${parsed.params[0]}` : undefined;
+        primary = formatZmkKeycapLegend(parsed.params[1] || "?");
+        secondaryLabel = parsed.params[0]
+          ? formatZmkKeycapLegend(parsed.params[0])
+          : undefined;
       } else if (parsed.behavior === "&lt") {
         const lIdx = parseInt(parsed.params[0] || "0", 10);
         const lName = layers[lIdx]?.displayName || `L${parsed.params[0] ?? 0}`;
-        header = `LT ${lName}`;
-        primary = parsed.params[1] || "?";
-        secondaryLabel = `H:${lName}`;
+        header = lName;
+        primary = formatZmkKeycapLegend(parsed.params[1] || "?");
       } else if (["&mo", "&to", "&tog", "&sl"].includes(parsed.behavior)) {
         const lIdx = parseInt(parsed.params[0] || "0", 10);
         header = parsed.behavior.slice(1).toUpperCase();
         primary = layers[lIdx]?.displayName || parsed.params[0] || "?";
+      } else if (parsed.behavior === "&bt") {
+        header = "BT";
+        if (parsed.params[0] === "BT_SEL") {
+          primary = parsed.params[1] ?? "0";
+        } else if (parsed.params[0] === "BT_CLR") {
+          primary = "CLR";
+        } else {
+          primary = (parsed.params[0] || "").replace(/^BT_/, "");
+        }
+      } else if (parsed.behavior === "&mkp") {
+        header = "M";
+        primary = (parsed.params[0] || "").replace(/CLK$/, "");
       } else if (parsed.params.length > 0) {
         header = parsed.behavior.slice(1).toUpperCase();
         primary = parsed.params.join(" ");
@@ -574,6 +588,15 @@ export const VisualRepoKeymapEditor = ({
         const def = customBehaviorDefs.find((d) => `&${d.label}` === parsed.behavior);
         primary = def?.displayName || parsed.behavior.slice(1);
       }
+
+      const len = Array.from(primary).length;
+      const legendSizeClass =
+        len <= 1
+          ? "text-[13px] font-medium"
+          : len <= 3
+            ? "text-[10.5px] font-medium tracking-wide"
+            : "text-[9.5px] font-medium tracking-normal";
+      const mutedGlyph = parsed.behavior === "&trans" || parsed.behavior === "&none";
 
       return {
         id: `repo-${selectedLayerIdx}-${idx}`,
@@ -590,7 +613,11 @@ export const VisualRepoKeymapEditor = ({
         isDiff: highlightedComboPositions.has(idx),
         tooltip: `Pos #${idx}: ${bindingStr}`,
         children: (
-          <span className="text-[11px] font-medium text-center leading-tight px-0.5 line-clamp-2 break-words">
+          <span
+            className={`${legendSizeClass} ${
+              mutedGlyph ? "opacity-45" : ""
+            } text-center leading-none max-w-full truncate`}
+          >
             {primary}
           </span>
         ),
