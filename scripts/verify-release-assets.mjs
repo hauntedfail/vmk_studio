@@ -20,6 +20,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import url from "node:url";
+import zlib from "node:zlib";
 import { spawn, spawnSync } from "node:child_process";
 
 export const EXIT_PASS = 0;
@@ -109,6 +110,53 @@ export function compareChecksums(expected, actual) {
     if (!actual.has(name)) errors.push(`${name}: listed in ${SUMS_FILE} but not present`);
   }
   return errors;
+}
+
+/** Returns the members of a Unix `ar` archive. Throws when the buffer is not one. */
+export function readArArchive(buf) {
+  if (buf.subarray(0, 8).toString("latin1") !== "!<arch>\n") throw new Error("not an ar archive");
+  const members = [];
+  let off = 8;
+  while (off + 60 <= buf.length) {
+    const header = buf.subarray(off, off + 60).toString("latin1");
+    const size = Number.parseInt(header.slice(48, 58).trim(), 10);
+    if (header.slice(58) !== "`\n" || !Number.isInteger(size) || off + 60 + size > buf.length) {
+      throw new Error(`corrupt ar member header at offset ${off}`);
+    }
+    members.push({ name: header.slice(0, 16).trim().replace(/\/$/, ""), data: buf.subarray(off + 60, off + 60 + size) });
+    off += 60 + size + (size % 2);
+  }
+  return members;
+}
+
+/** Returns one regular file from an uncompressed tar archive, or null when it is absent. */
+export function readTarFile(buf, wanted) {
+  const text = (b) => b.toString("latin1").replace(/\0.*$/s, "");
+  for (let off = 0; off + 512 <= buf.length; ) {
+    const header = buf.subarray(off, off + 512);
+    if (header.every((b) => b === 0)) break;
+    const size = Number.parseInt(text(header.subarray(124, 136)).trim() || "0", 8);
+    if (!Number.isInteger(size)) throw new Error(`corrupt tar header at offset ${off}`);
+    const prefix = text(header.subarray(345, 500));
+    const name = `${prefix ? `${prefix}/` : ""}${text(header.subarray(0, 100))}`.replace(/^\.\//, "");
+    const type = String.fromCharCode(header[156]);
+    if ((type === "0" || type === "\0") && name === wanted) return buf.subarray(off + 512, off + 512 + size);
+    off += 512 + Math.ceil(size / 512) * 512;
+  }
+  return null;
+}
+
+/** Reads the control file of a Debian package. Throws with the reason when it cannot. */
+export function readDebControl(buf) {
+  const member = readArArchive(buf).find((m) => m.name.startsWith("control.tar"));
+  if (!member) throw new Error("no control.tar member");
+  let tar;
+  if (member.name === "control.tar") tar = member.data;
+  else if (member.name === "control.tar.gz") tar = zlib.gunzipSync(member.data);
+  else throw new Error(`unsupported compression: ${member.name}`);
+  const control = readTarFile(tar, "control");
+  if (!control) throw new Error("control.tar has no control file");
+  return control.toString("utf8");
 }
 
 export function sha256File(file) {
@@ -344,15 +392,15 @@ export async function main(argv) {
 
     // --- Static: Debian package control fields ---
     if (file("linux-deb")) {
-      const debDir = path.join(work, "deb");
-      fs.mkdirSync(debDir);
-      const unpack = run("ar", ["-x", file("linux-deb")], { cwd: debDir });
-      const controlTar = fs.readdirSync(debDir).find((n) => n.startsWith("control.tar"));
-      const untar = controlTar ? run("tar", ["-xf", controlTar], { cwd: debDir }) : null;
-      const readable = unpack.status === 0 && untar?.status === 0 && fs.existsSync(path.join(debDir, "control"));
-      check("linux.deb.control", readable, readable ? "control file extracted" : "not a readable Debian package");
-      if (readable) {
-        const control = fs.readFileSync(path.join(debDir, "control"), "utf8");
+      let control = null;
+      let reason = "control file read";
+      try {
+        control = readDebControl(fs.readFileSync(file("linux-deb")));
+      } catch (err) {
+        reason = `not a readable Debian package: ${err.message}`;
+      }
+      check("linux.deb.control", control !== null, reason);
+      if (control !== null) {
         const field = (k) => control.match(new RegExp(`^${k}:\\s*(.+)$`, "m"))?.[1]?.trim();
         check("linux.deb.version", field("Version") === version, `Version: ${field("Version")}`);
         check("linux.deb.arch", field("Architecture") === "amd64", `Architecture: ${field("Architecture")}`);

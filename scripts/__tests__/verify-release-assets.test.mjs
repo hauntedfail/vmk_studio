@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,6 +13,7 @@ import {
   main,
   matchAssetSet,
   parseSha256Sums,
+  readDebControl,
   sha256File,
 } from "../verify-release-assets.mjs";
 
@@ -98,6 +100,61 @@ describe("compareChecksums", () => {
     expect(errors.join("\n")).toMatch(/a: sha256 .* does not match/);
     expect(errors.join("\n")).toMatch(/extra: not listed/);
     expect(errors.join("\n")).toMatch(/gone: listed .* but not present/);
+  });
+});
+
+describe("readDebControl", () => {
+  function tarEntry(name, body) {
+    const header = Buffer.alloc(512);
+    header.write(name, 0, "latin1");
+    header.write(body.length.toString(8).padStart(11, "0"), 124, "latin1");
+    header.write("0", 156, "latin1");
+    header.write("ustar", 257, "latin1");
+    const data = Buffer.alloc(Math.ceil(body.length / 512) * 512);
+    Buffer.from(body).copy(data);
+    return Buffer.concat([header, data]);
+  }
+
+  function arArchive(members) {
+    const parts = [Buffer.from("!<arch>\n", "latin1")];
+    for (const [name, data] of members) {
+      const header = `${name.padEnd(16)}${"0".padEnd(12)}${"0".padEnd(6)}${"0".padEnd(6)}${"100644".padEnd(8)}` +
+        `${String(data.length).padEnd(10)}\`\n`;
+      parts.push(Buffer.from(header, "latin1"), data);
+      if (data.length % 2) parts.push(Buffer.from("\n"));
+    }
+    return Buffer.concat(parts);
+  }
+
+  const controlText = "Package: vmk-studio\nVersion: 0.4.0\nArchitecture: amd64\n";
+  const controlTar = Buffer.concat([
+    tarEntry("./md5sums", "0 file\n"),
+    tarEntry("./control", controlText),
+    Buffer.alloc(1024),
+  ]);
+
+  it("reads the control file of a package", () => {
+    const deb = arArchive([
+      ["debian-binary", Buffer.from("2.0\n")],
+      ["control.tar.gz", zlib.gzipSync(controlTar)],
+      ["data.tar.gz", zlib.gzipSync(Buffer.alloc(1024))],
+    ]);
+    expect(readDebControl(deb)).toBe(controlText);
+  });
+
+  it("rejects a file that is not an ar archive", () => {
+    expect(() => readDebControl(Buffer.from("payload of something else"))).toThrow(/not an ar archive/);
+  });
+
+  it("rejects a truncated archive", () => {
+    const deb = arArchive([["control.tar.gz", zlib.gzipSync(controlTar)]]);
+    expect(() => readDebControl(deb.subarray(0, deb.length - 20))).toThrow(/corrupt ar member header/);
+  });
+
+  it("rejects a package without a control file", () => {
+    const noControl = Buffer.concat([tarEntry("./md5sums", "0 file\n"), Buffer.alloc(1024)]);
+    const deb = arArchive([["control.tar.gz", zlib.gzipSync(noControl)]]);
+    expect(() => readDebControl(deb)).toThrow(/no control file/);
   });
 });
 
