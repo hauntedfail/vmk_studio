@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.4.0] (2026-11-24)
+## [0.4.0] (2026-11-26)
 
 First release of **VMK Studio**, forked from ZMK Studio `v0.3.1` for custom firmware workflows (including beekeeb Toucan 2).
 
@@ -14,6 +14,7 @@ First release of **VMK Studio**, forked from ZMK Studio `v0.3.1` for custom firm
 * **Custom Behaviours CRUD & Source Editor**: Create, edit, and remove custom DTS behaviours in `dts/cg_toggle.dtsi` and edit repository firmware files with live `git diff` and per-file revert.
 * **Build, Test & Half-Guarded Flash Pipeline**: Dual backend (Vite local middleware and Tauri v2 Rust commands) for running host tests, building firmware with `west`, verifying SHA-256 checksums, rebuilding the macOS helper, and flashing Left/Right UF2 images with `CURRENT.UF2` central-marker cross-flash detection.
 * **Rare UI Redesign**: Monochrome neutral palette with `#FC4C01` accent, sculpted keycaps, dark/light theme switcher, and `GooeyNav`, `ThemeSelector`, `CodeBlock`, `DeleteButton`, and toast primitives from Rare UI.
+* **Character Logo & Icon Set**: Original cel-shaded character mark with the `VMK STUDIO` wordmark in the README (dark and light variants), the app header, and the connect modal, plus a regenerated favicon, Apple touch icon, PWA manifest icons, and Tauri desktop icons (`.icns` / `.ico`).
 * **CI & Safe Release Pipeline**: GitHub Actions CI for frontend (version sync, type-check, ESLint, Vitest, build, preview smoke test) and Rust/Tauri (`cargo fmt`, strict `clippy -D warnings`, unit tests on macOS and Linux), plus a gated tag-triggered workflow that builds desktop bundles and creates a Draft GitHub Release with `SHA256SUMS.txt`.
 
 ## [0.3.1](https://github.com/zmkfirmware/zmk-studio/compare/v0.3.0...v0.3.1) (2025-01-20)
