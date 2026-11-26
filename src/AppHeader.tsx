@@ -114,7 +114,7 @@ export const AppHeader = ({
     <header className="relative z-30 flex items-center justify-between gap-4 h-14 px-4 bg-background border-b border-border max-w-full">
       {/* Brand */}
       <div className="flex items-center gap-2.5 shrink-0">
-        <img src="/vmk.svg" alt="VMK Studio" className="h-7 w-7 rounded-lg" />
+        <img src="/vmk.png" alt="VMK Studio" className="h-7 w-7 rounded-lg" />
         <div className="leading-tight">
           <div className="text-[13px] font-semibold tracking-tight text-foreground">
             VMK Studio

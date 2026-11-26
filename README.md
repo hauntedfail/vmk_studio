@@ -1,6 +1,22 @@
-# VMK Studio
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/logo-light.png" />
+    <img src="docs/assets/logo-dark.png" alt="VMK Studio" width="600" />
+  </picture>
 
-**VMK Studio** is a dedicated desktop and web Studio app built specifically for the **beekeeb Toucan 2** split keyboard, forked from [ZMK Studio](https://github.com/zmkfirmware/zmk-studio).
+  <p>
+    <strong>VMK Studio</strong> is a dedicated desktop and web Studio app built specifically for the <strong>beekeeb Toucan 2</strong> split keyboard, forked from <a href="https://github.com/zmkfirmware/zmk-studio">ZMK Studio</a>.
+  </p>
+
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshot-dark.png" />
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/screenshot-light.png" />
+    <img src="docs/assets/screenshot-dark.png" alt="VMK Studio Toucan 2 Keymap and Hardware Canvas" width="100%" />
+  </picture>
+</div>
+
+<br />
 
 Its purpose is to bring **QMK-grade features and customisability** onto **ZMK** — and make day-to-day keymap, firmware, display, and trackpad tuning effortless on Toucan 2 without stock ZMK Studio overwriting custom behaviours.
 

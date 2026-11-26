@@ -278,7 +278,7 @@ export const ConnectModal = ({
       <div className="space-y-4">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <img src="/vmk.svg" alt="VMK Studio" className="h-7 w-7 rounded" />
+            <img src="/vmk.png" alt="VMK Studio" className="h-7 w-7 rounded" />
             <h1 className="text-lg font-semibold">Connect to VMK Studio</h1>
           </div>
           {onDismiss && (
