@@ -15,6 +15,7 @@
     "check:version": "node scripts/check-version-sync.mjs --require-changelog",
     "smoke": "node scripts/smoke-preview.mjs",
     "check:release": "bash scripts/check-release.sh",
+    "verify:release": "node scripts/verify-release-assets.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "storybook": "storybook dev -p 6006",

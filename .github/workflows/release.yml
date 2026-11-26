@@ -224,6 +224,12 @@ jobs:
             done
           fi
 
+          # GitHub rewrites spaces in uploaded asset names, so settle the names
+          # here, before the checksums are computed over them.
+          for f in release-assets/*\ *; do
+            mv "$f" "${f// /-}"
+          done
+
           ls -la release-assets
           test "$(ls -A release-assets)"
           (
@@ -243,13 +249,19 @@ jobs:
           New-Item -ItemType Directory -Force -Path release-assets | Out-Null
           Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*.exe" -ErrorAction SilentlyContinue | Copy-Item -Destination release-assets
           Get-ChildItem -Path "src-tauri/target/release/bundle/msi/*.msi" -ErrorAction SilentlyContinue | Copy-Item -Destination release-assets
-          $files = Get-ChildItem -Path release-assets -File
+          # GitHub rewrites spaces in uploaded asset names, so settle the names
+          # here, before the checksums are computed over them.
+          Get-ChildItem -Path release-assets -File | Where-Object { $_.Name -match ' ' } |
+            Rename-Item -NewName { $_.Name -replace ' ', '-' }
+          $files = @(Get-ChildItem -Path release-assets -File)
           if ($files.Count -eq 0) { throw "No Windows release bundles produced" }
           $lines = foreach ($f in $files) {
             $hash = (Get-FileHash -Algorithm SHA256 -Path $f.FullName).Hash.ToLowerInvariant()
             "$hash  $($f.Name)"
           }
-          $lines | Set-Content -Encoding utf8 -Path "release-assets/SHA256SUMS-${{ matrix.name }}.txt"
+          # LF without a BOM: `sha256sum -c` reads a carriage return as part of the file name.
+          $sums = Join-Path (Resolve-Path release-assets) "SHA256SUMS-${{ matrix.name }}.txt"
+          [System.IO.File]::WriteAllText($sums, (($lines -join "`n") + "`n"), (New-Object System.Text.UTF8Encoding $false))
           Get-Content "release-assets/SHA256SUMS-${{ matrix.name }}.txt"
 
       - name: Upload bundle artifacts
@@ -259,15 +271,17 @@ jobs:
           path: release-assets/*
           if-no-files-found: error
 
-  draft-release:
-    name: Create Draft GitHub Release
-    needs: [preflight, rust-gate, build-bundles]
-    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  verify-assets:
+    name: Verify Release Assets (Checksums, Bundles, macOS Launch)
+    needs: [preflight, build-bundles]
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
       - name: Download built artifacts
         uses: actions/download-artifact@v4
@@ -283,6 +297,34 @@ jobs:
           cat SHA256SUMS-*.txt | sort -k2 > SHA256SUMS.txt
           rm -f SHA256SUMS-*.txt
           cat SHA256SUMS.txt
+
+      - name: Verify assets and launch the macOS bundle
+        run: |
+          node scripts/verify-release-assets.mjs "${{ needs.preflight.outputs.tag }}" \
+            --dir dist-release --ref "${GITHUB_SHA}" --launch
+
+      - name: Upload verified release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: vmk-release-verified
+          path: dist-release/*
+          if-no-files-found: error
+
+  draft-release:
+    name: Create Draft GitHub Release
+    needs: [preflight, rust-gate, build-bundles, verify-assets]
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified release assets
+        uses: actions/download-artifact@v4
+        with:
+          name: vmk-release-verified
+          path: dist-release
 
       - name: Extract changelog release notes
         run: |
@@ -311,3 +353,8 @@ jobs:
               --title "VMK Studio ${TAG}" \
               --notes-file release-notes.md
           fi
+
+      - name: Verify the uploaded draft assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/verify-release-assets.mjs "${GITHUB_REF_NAME}"

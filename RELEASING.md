@@ -53,9 +53,34 @@ VMK Studio uses a gated, draft-first release flow so untested artefacts are neve
    - Verifies that the tag matches `package.json`, `Cargo.toml`, `tauri.conf.json`, and `CHANGELOG.md`.
    - Builds Tauri bundles for macOS (universal `.dmg` + `.app.tar.gz`), Linux (`.deb`), and Windows (`.exe` / `.msi`).
    - Generates a unified `SHA256SUMS.txt`.
-   - Creates a **Draft GitHub Release** with extracted changelog notes and checksums attached.
+   - Verifies the assets with `scripts/verify-release-assets.mjs` on a macOS runner (see below). The draft is not created unless this passes.
+   - Creates a **Draft GitHub Release** with extracted changelog notes and checksums attached, then downloads the draft and verifies it again, so a name or checksum that changed during upload fails the run.
 
-3. Review the Draft GitHub Release on GitHub, spot-check the downloaded installer on macOS, and click **Publish release** when ready.
+3. Repeat the verification on your own Mac against the draft, then click **Publish release** on GitHub:
+
+   ```sh
+   npm run verify:release -- vX.Y.Z --launch
+   ```
+
+## Asset Verification
+
+`scripts/verify-release-assets.mjs <vX.Y.Z> [--dir <assets-dir>] [--ref <git-ref>] [--launch]` downloads the release assets with `gh` (or reads them from `--dir`) and checks:
+
+- **Asset set**: exactly one `.dmg`, `.app.tar.gz`, `.deb`, `.exe`, and `.msi` for the version, plus `SHA256SUMS.txt`, with names GitHub does not rewrite on upload.
+- **Checksums**: every file is listed in `SHA256SUMS.txt` under its real name, with LF line endings, and its hash matches.
+- **Windows and Linux**: installer container signatures, and the `Version` and `Architecture` fields of the Debian package. These installers are not launched.
+- **macOS** (on a Mac): bundle version and identifier, universal architectures, `codesign --verify --deep --strict`, the bundled icon against `src-tauri/icons/icon.icns` at the tag, and that the `.dmg` and the tarball hold the same executable.
+- **Launch** (`--launch`, on a Mac): the app starts, shows a window, and is still running five seconds later.
+
+| Exit code | Meaning |
+| --- | --- |
+| `0` | Pass |
+| `1` | Static violation (asset set, checksum, version, identity, signature, icon) |
+| `2` | Launch violation (the app exited early or never showed a window) |
+| `3` | The assets could not be downloaded |
+| `5` | Tool or I/O error |
+
+The launch check proves that the app starts, not that every screen works.
 
 ## Code Signing Notes
 

@@ -53,13 +53,14 @@ npm run dev           # Start web UI + local VMK firmware/build/flash API bridge
 npm run build         # Type-check and build production frontend
 npm run smoke         # Smoke-test built dist/ bundle via vite preview
 npm run check:release # Run all local frontend + Rust pre-release gates
+npm run verify:release -- vX.Y.Z --launch # Verify the assets of a (draft) release
 npm run tauri dev     # Run native macOS Tauri desktop app
 ```
 
 ## CI & Releases
 
 - `.github/workflows/ci.yml` verifies version sync, TypeScript types, ESLint, Vitest, production bundle build/smoke test, and Rust `fmt` / strict `clippy -D warnings` / unit tests on both macOS and Ubuntu 24.04.
-- `.github/workflows/release.yml` runs on `v*.*.*` tags (or manually with `dry_run=true`), gates builds on all checks, packages Tauri desktop installers with `SHA256SUMS.txt`, and creates a **Draft GitHub Release** for manual review. See [RELEASING.md](RELEASING.md).
+- `.github/workflows/release.yml` runs on `v*.*.*` tags (or manually with `dry_run=true`), gates builds on all checks, packages Tauri desktop installers with `SHA256SUMS.txt`, verifies them (checksums, bundle identity, macOS launch) with `scripts/verify-release-assets.mjs`, and creates a **Draft GitHub Release** for manual review. See [RELEASING.md](RELEASING.md).
 
 ## Licensing
 
