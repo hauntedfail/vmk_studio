@@ -235,6 +235,10 @@ fn merge_paths(partial: Option<PartialWorkspacePaths>) -> VmkWorkspacePaths {
     }
 }
 
+/// Resolves a repository-relative path, refusing anything that leaves the
+/// repository or names a `.git` directory. `assertInside` in
+/// scripts/vmk-dev-plugin.ts applies the same rules; testdata/backend-parity.json
+/// holds the cases both must pass.
 fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     let rel_path = Path::new(rel);
     if rel_path.is_absolute() {
@@ -244,7 +248,9 @@ fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
     for comp in rel_path.components() {
         match comp {
             Component::Normal(seg) => {
-                if cleaned.as_os_str().is_empty() && seg == ".git" {
+                // Compared without regard to case: the default macOS and
+                // Windows file systems open ".GIT" as ".git".
+                if seg.to_string_lossy().eq_ignore_ascii_case(".git") {
                     return Err("Modifying .git internals is not permitted.".into());
                 }
                 cleaned.push(seg);
@@ -256,6 +262,19 @@ fn safe_join(root: &Path, rel: &str) -> Result<PathBuf, String> {
         }
     }
     Ok(root.join(cleaned))
+}
+
+/// A bare `test-*.sh` file name. `isValidTestScriptName` in
+/// scripts/vmk-dev-plugin.ts applies the same rule.
+fn is_valid_test_script_name(name: &str) -> bool {
+    name.strip_prefix("test-")
+        .and_then(|rest| rest.strip_suffix(".sh"))
+        .is_some_and(|stem| {
+            !stem.is_empty()
+                && stem
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        })
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
@@ -927,11 +946,7 @@ pub async fn vmk_start_job(
         ),
         "test-single" => {
             let script = options.script_name.unwrap_or_else(|| "test-host.sh".into());
-            let valid = script.starts_with("test-")
-                && script.ends_with(".sh")
-                && !script.contains('/')
-                && !script.contains("..");
-            if !valid {
+            if !is_valid_test_script_name(&script) {
                 return Err(format!("Invalid test script name: {script}"));
             }
             spawn_job_thread(
@@ -1094,6 +1109,94 @@ mod tests {
             out.extend_from_slice(&block);
         }
         out
+    }
+
+    // The cases in testdata/backend-parity.json are also run against the Node
+    // backend (src/vmk/__tests__/backendParity.test.ts), so both must agree.
+    fn shared_cases(group: &str) -> Vec<serde_json::Value> {
+        let all: serde_json::Value =
+            serde_json::from_str(include_str!("../../testdata/backend-parity.json")).unwrap();
+        let cases = all[group]["cases"].as_array().unwrap().clone();
+        assert!(!cases.is_empty(), "no shared cases for {group}");
+        cases
+    }
+
+    fn build_shared_uf2(case: &serde_json::Value) -> Vec<u8> {
+        let mut out = Vec::new();
+        for spec in case["blocks"].as_array().unwrap() {
+            let mut block = [0u8; 512];
+            if spec["magic"].as_bool().unwrap() {
+                block[0..4].copy_from_slice(&0x0A324655u32.to_le_bytes());
+                block[4..8].copy_from_slice(&0x9E5D5157u32.to_le_bytes());
+            }
+            let declared = spec["declaredSize"].as_u64().unwrap() as u32;
+            block[16..20].copy_from_slice(&declared.to_le_bytes());
+            block[32..508].fill(spec["fill"].as_u64().unwrap() as u8);
+            for text in spec["text"].as_array().unwrap() {
+                let at = 32 + text["at"].as_u64().unwrap() as usize;
+                let value = text["value"].as_str().unwrap().as_bytes();
+                block[at..at + value.len()].copy_from_slice(value);
+            }
+            out.extend_from_slice(&block);
+        }
+        if let Some(trailing) = case["trailing"].as_str() {
+            out.extend_from_slice(trailing.as_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn shared_path_confinement_cases() {
+        let root = Path::new("/tmp/vmk-parity-root");
+        let mut failures = Vec::new();
+        for case in shared_cases("pathConfinement") {
+            let rel = case["rel"].as_str().unwrap();
+            let got = safe_join(root, rel);
+            if case["allowed"].as_bool().unwrap() {
+                let want = root.join(case["resolved"].as_str().unwrap());
+                if got.as_deref().ok() != Some(want.as_path()) {
+                    failures.push(format!("{rel:?}: expected {want:?}, got {got:?}"));
+                }
+            } else if got.is_ok() {
+                failures.push(format!("{rel:?}: expected a refusal, got {got:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn shared_test_script_name_cases() {
+        let mut failures = Vec::new();
+        for case in shared_cases("testScriptNames") {
+            let name = case["name"].as_str().unwrap();
+            let want = case["valid"].as_bool().unwrap();
+            if is_valid_test_script_name(name) != want {
+                failures.push(format!("{name:?}: expected valid={want}"));
+            }
+        }
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn shared_uf2_marker_cases() {
+        let mut failures = Vec::new();
+        for case in shared_cases("uf2Markers") {
+            let name = case["name"].as_str().unwrap();
+            let want_half = case["half"].as_str().unwrap();
+            let want_markers: Vec<String> = case["markers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|m| m.as_str().unwrap().to_string())
+                .collect();
+            let (half, markers) = detect_uf2_central_markers(&build_shared_uf2(&case));
+            if half != want_half || markers != want_markers {
+                failures.push(format!(
+                    "{name}: expected {want_half} {want_markers:?}, got {half} {markers:?}"
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
     }
 
     #[test]

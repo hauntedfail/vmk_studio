@@ -1,0 +1,133 @@
+{
+  "about": "Inputs and expected results that the Node backend (scripts/vmk-dev-plugin.ts) and the Rust backend (src-tauri/src/vmk.rs) must both satisfy. Each side reads this file in its own test suite.",
+  "pathConfinement": {
+    "about": "A relative path is allowed only when it stays inside the repository and has no '.git' component in any letter case. 'resolved' is the path below the repository root, with forward slashes.",
+    "cases": [
+      { "rel": "config/toucan.keymap", "allowed": true, "resolved": "config/toucan.keymap" },
+      { "rel": "./config/toucan.keymap", "allowed": true, "resolved": "config/toucan.keymap" },
+      { "rel": "config//toucan.keymap", "allowed": true, "resolved": "config/toucan.keymap" },
+      { "rel": "Kconfig", "allowed": true, "resolved": "Kconfig" },
+      { "rel": ".gitignore", "allowed": true, "resolved": ".gitignore" },
+      { "rel": ".github/workflows/ci.yml", "allowed": true, "resolved": ".github/workflows/ci.yml" },
+      { "rel": "src/.gitkeep", "allowed": true, "resolved": "src/.gitkeep" },
+      { "rel": "..hidden/file", "allowed": true, "resolved": "..hidden/file" },
+      { "rel": "../outside", "allowed": false },
+      { "rel": "config/../../outside", "allowed": false },
+      { "rel": "config/../Kconfig", "allowed": false },
+      { "rel": "config/..", "allowed": false },
+      { "rel": "/etc/passwd", "allowed": false },
+      { "rel": ".git", "allowed": false },
+      { "rel": ".git/config", "allowed": false },
+      { "rel": "./.git/hooks/pre-commit", "allowed": false },
+      { "rel": ".GIT/config", "allowed": false },
+      { "rel": ".Git", "allowed": false },
+      { "rel": "vendor/lib/.git/config", "allowed": false }
+    ]
+  },
+  "testScriptNames": {
+    "about": "Name of a script under scripts/ that the test-single job may run.",
+    "cases": [
+      { "name": "test-host.sh", "valid": true },
+      { "name": "test-cg_toggle-2.sh", "valid": true },
+      { "name": "test-.sh", "valid": false },
+      { "name": "build.sh", "valid": false },
+      { "name": "test-a.sh.bak", "valid": false },
+      { "name": "test-a.SH", "valid": false },
+      { "name": "../test-a.sh", "valid": false },
+      { "name": "scripts/test-a.sh", "valid": false },
+      { "name": "test-a b.sh", "valid": false },
+      { "name": "test-a;rm.sh", "valid": false },
+      { "name": "test-a.sh\n", "valid": false },
+      { "name": "", "valid": false }
+    ]
+  },
+  "uf2Markers": {
+    "about": "A UF2 image is built from 512-byte blocks. Each block has a 476-byte payload area at offset 32, filled with 'fill' and overlaid with each 'text' entry at its offset. When 'magic' is true the block starts with the words 0x0A324655 and 0x9E5D5157 (little-endian); the word at offset 16 is 'declaredSize'. 'trailing' is ASCII appended after the last block. An image is 'left' when any marker string occurs in the concatenated declared payloads, and markers are reported in table order.",
+    "cases": [
+      {
+        "name": "marker split across two blocks",
+        "blocks": [
+          { "magic": true, "declaredSize": 256, "fill": 170, "text": [{ "at": 249, "value": "Studio " }] },
+          { "magic": true, "declaredSize": 256, "fill": 187, "text": [{ "at": 0, "value": "Unlock" }] }
+        ],
+        "half": "left",
+        "markers": ["Studio Unlock"]
+      },
+      {
+        "name": "marker split at the largest payload size",
+        "blocks": [
+          { "magic": true, "declaredSize": 476, "fill": 0, "text": [{ "at": 469, "value": "Studio " }] },
+          { "magic": true, "declaredSize": 476, "fill": 0, "text": [{ "at": 0, "value": "Unlock" }] }
+        ],
+        "half": "left",
+        "markers": ["Studio Unlock"]
+      },
+      {
+        "name": "peripheral image without markers",
+        "blocks": [
+          { "magic": true, "declaredSize": 64, "fill": 0, "text": [{ "at": 0, "value": "toucan_right_peripheral_split_relay" }] }
+        ],
+        "half": "right_or_other",
+        "markers": []
+      },
+      {
+        "name": "every marker, reported in table order",
+        "blocks": [
+          { "magic": true, "declaredSize": 64, "fill": 0, "text": [{ "at": 0, "value": "HID Over GATT Send Work" }] },
+          { "magic": true, "declaredSize": 64, "fill": 0, "text": [{ "at": 3, "value": "usbworkq" }] },
+          { "magic": true, "declaredSize": 64, "fill": 0, "text": [{ "at": 5, "value": "studio_rpc_thread" }] },
+          { "magic": true, "declaredSize": 64, "fill": 0, "text": [{ "at": 7, "value": "Studio Unlock" }] }
+        ],
+        "half": "left",
+        "markers": ["Studio Unlock", "studio_rpc_thread", "usbworkq", "HID Over GATT Send Work"]
+      },
+      {
+        "name": "marker in a block without the UF2 magic",
+        "blocks": [
+          { "magic": false, "declaredSize": 64, "fill": 0, "text": [{ "at": 0, "value": "usbworkq" }] }
+        ],
+        "half": "right_or_other",
+        "markers": []
+      },
+      {
+        "name": "marker beyond the declared payload size",
+        "blocks": [
+          { "magic": true, "declaredSize": 4, "fill": 0, "text": [{ "at": 8, "value": "usbworkq" }] }
+        ],
+        "half": "right_or_other",
+        "markers": []
+      },
+      {
+        "name": "declared payload size over the limit",
+        "blocks": [
+          { "magic": true, "declaredSize": 477, "fill": 0, "text": [{ "at": 0, "value": "usbworkq" }] }
+        ],
+        "half": "right_or_other",
+        "markers": []
+      },
+      {
+        "name": "marker in a trailing partial block",
+        "blocks": [
+          { "magic": true, "declaredSize": 64, "fill": 0, "text": [] }
+        ],
+        "trailing": "usbworkq",
+        "half": "right_or_other",
+        "markers": []
+      },
+      {
+        "name": "marker in another letter case",
+        "blocks": [
+          { "magic": true, "declaredSize": 64, "fill": 0, "text": [{ "at": 0, "value": "STUDIO UNLOCK" }] }
+        ],
+        "half": "right_or_other",
+        "markers": []
+      },
+      {
+        "name": "empty image",
+        "blocks": [],
+        "half": "right_or_other",
+        "markers": []
+      }
+    ]
+  }
+}

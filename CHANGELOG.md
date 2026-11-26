@@ -6,6 +6,12 @@
 
 * **Local API request guard**: The `/api/vmk/*` API served by `npm run dev` now answers only on a loopback host, rejects cross-origin and cross-site requests, and requires a JSON content type. Before this, any web page open in the browser while the dev server ran could write files to a folder of its choice and start the build and test scripts, and a DNS-rebinding page could also read files. The desktop app does not use this API and is not affected.
 
+* **Stricter path and script-name checks on both backends**: Repository paths are now refused when they contain a `..` segment or a `.git` directory at any depth and in any letter case, and the `test-single` job accepts only a bare `test-*.sh` name made of letters, digits, `_` and `-`. Before this, the dev server allowed a nested `.git` path and a `.GIT` spelling and accepted a script name with a directory prefix, and the desktop app allowed a nested `.git` path, a `.GIT` spelling, and script names containing spaces or `;`.
+
+### Changed
+
+* **One implementation of the firmware repository operations**: Building the firmware model, applying a tuning patch, saving the keymap, and adding or removing a custom behaviour now live in `src/vmk/firmwareOps.ts` and are used by both the dev server (`scripts/vmk-dev-plugin.ts`) and the desktop app (`src/vmk/api.ts`); each backend only supplies file access. The rules that must exist in both TypeScript and Rust (path confinement, script names, UF2 half detection) are checked against the shared cases in `testdata/backend-parity.json` by `npm test` and `cargo test`, and a test fails when a command, endpoint, marker string or editable file is added to one backend only.
+
 ## [0.4.0] (2026-11-26)
 
 First release of **VMK Studio**, forked from ZMK Studio `v0.3.1` for custom firmware workflows (including beekeeb Toucan 2).

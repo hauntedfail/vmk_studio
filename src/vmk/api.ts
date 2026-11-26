@@ -1,8 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { FirmwareBundle, RepoFileIo } from "./firmwareOps";
 import type {
   CommandJob,
   CustomBehaviorDef,
-  EditableRepoFile,
   FirmwareModel,
   FirmwareTuningPatch,
   JobKind,
@@ -60,104 +60,21 @@ export async function getWorkspaceStatus(
   return postApi<VmkWorkspaceStatus>("status", paths ?? {});
 }
 
+/** File access through the Tauri commands, confined to the repository by `safe_join` in vmk.rs. */
+function tauriRepoIo(repoPath: string): RepoFileIo {
+  return {
+    read: (relPath) => readRepoFile(repoPath, relPath),
+    write: (relPath, content) => writeRepoFile(repoPath, relPath, content),
+  };
+}
+
 export async function getFirmwareModel(repoPath?: string): Promise<FirmwareModel> {
   if (isTauriRuntime()) {
-    const files = await invoke<{
-      repoPath: string;
-      keymap: string;
-      leftOverlay: string;
-      rightOverlay: string;
-      toucanDtsi: string;
-      leftConf: string;
-      rightConf: string;
-      kconfig: string;
-      cgZoomC: string;
-      cgNavC: string;
-      helperSmootherSwift: string;
-      toucanJson: string;
-      dtsFiles: Array<{ relPath: string; content: string }>;
-      dirtyFiles: string[];
-      existingEditable: Array<{ relPath: string; exists: boolean }>;
-    }>("vmk_read_firmware_bundle", { repoPath: repoPath ?? "" });
-
-    const [
-      {
-        parseConfTuning,
-        parseCustomBehaviors,
-        parseHoldTapTuning,
-        parseKeymapLayers,
-        parseTrackpadHardware,
-        parseTrackpadProcessors,
-      },
-      { parseCombos, parseConditionalLayers },
-      { parseCustomCFeatures, parseHelperSmoother, parseLeftOverlayGates },
-    ] = await Promise.all([
-      import("./dtsParser"),
-      import("./keymapCodec"),
-      import("./customFirmwareCodec"),
+    const [bundle, { buildFirmwareModel }] = await Promise.all([
+      invoke<FirmwareBundle>("vmk_read_firmware_bundle", { repoPath: repoPath ?? "" }),
+      import("./firmwareOps"),
     ]);
-
-    const customBehaviors = files.dtsFiles.flatMap((f) =>
-      parseCustomBehaviors(f.content, f.relPath)
-    );
-    let physicalLayout: FirmwareModel["physicalLayout"] = [];
-    if (files.toucanJson) {
-      try {
-        const parsed = JSON.parse(files.toucanJson);
-        const first = Object.values(parsed.layouts || {})[0] as
-          | { layout?: FirmwareModel["physicalLayout"] }
-          | undefined;
-        if (first?.layout) physicalLayout = first.layout;
-      } catch {
-        // ignore
-      }
-    }
-
-    const dirtySet = new Set(files.dirtyFiles);
-    const categories: Record<
-      string,
-      { label: string; category: EditableRepoFile["category"] }
-    > = {
-      "config/toucan.keymap": { label: "toucan.keymap", category: "keymap" },
-      "dts/cg_toggle.dtsi": { label: "cg_toggle.dtsi", category: "behavior" },
-      "config/toucan_left.overlay": { label: "config/toucan_left.overlay", category: "behavior" },
-      "config/toucan_right.overlay": { label: "config/toucan_right.overlay", category: "behavior" },
-      "boards/shields/toucan/toucan.dtsi": { label: "shields/toucan.dtsi", category: "shield" },
-      "boards/shields/toucan/toucan_left.overlay": { label: "shields/toucan_left.overlay", category: "shield" },
-      "boards/shields/toucan/toucan_right.overlay": { label: "shields/toucan_right.overlay", category: "shield" },
-      "boards/shields/toucan/toucan_left.conf": { label: "toucan_left.conf", category: "config" },
-      "boards/shields/toucan/toucan_right.conf": { label: "toucan_right.conf", category: "config" },
-      Kconfig: { label: "Kconfig", category: "config" },
-      "src/cg_toggle.c": { label: "src/cg_toggle.c", category: "source" },
-      "src/cg_zoom.c": { label: "src/cg_zoom.c", category: "source" },
-      "src/cg_nav.c": { label: "src/cg_nav.c", category: "source" },
-      "src/input_processor_double_tap.c": { label: "src/input_processor_double_tap.c", category: "source" },
-      "src/split_input_relay.c": { label: "src/split_input_relay.c", category: "source" },
-      "host/macos/Sources/Core/ZoomSmoother.swift": { label: "ZoomSmoother.swift", category: "helper" },
-    };
-
-    return {
-      repoPath: files.repoPath,
-      customBehaviors,
-      holdTap: parseHoldTapTuning(files.keymap),
-      trackpadHardware: parseTrackpadHardware(files.rightOverlay),
-      trackpadProcessors: parseTrackpadProcessors(files.toucanDtsi),
-      leftOverlayGates: parseLeftOverlayGates(files.leftOverlay),
-      customCFeatures: parseCustomCFeatures(files.cgZoomC, files.cgNavC),
-      helperSmoother: parseHelperSmoother(files.helperSmootherSwift),
-      conf: parseConfTuning(files.leftConf, files.rightConf, files.kconfig),
-      physicalLayout,
-      repoKeymapLayers: parseKeymapLayers(files.keymap),
-      conditionalLayers: parseConditionalLayers(files.keymap),
-      combos: parseCombos(files.keymap),
-      editableFiles: files.existingEditable.map((e) => ({
-        relPath: e.relPath,
-        label: categories[e.relPath]?.label || e.relPath,
-        category: categories[e.relPath]?.category || "config",
-        exists: e.exists,
-        modified: dirtySet.has(e.relPath),
-      })),
-    };
+    return buildFirmwareModel(bundle);
   }
 
   return postApi<FirmwareModel>("firmware-model", { repoPath });
@@ -168,103 +85,8 @@ export async function applyFirmwarePatch(
   patch: FirmwareTuningPatch
 ): Promise<{ changedFiles: string[]; model: FirmwareModel }> {
   if (isTauriRuntime()) {
-    const [
-      {
-        updateConfTuning,
-        updateHoldTapTuning,
-        updateTrackpadHardware,
-        updateTrackpadProcessors,
-      },
-      { updateCustomCFeatures, updateHelperSmoother, updateLeftOverlayGates },
-    ] = await Promise.all([
-      import("./dtsParser"),
-      import("./customFirmwareCodec"),
-    ]);
-
-    const changedFiles: string[] = [];
-    if (patch.holdTap) {
-      const rel = "config/toucan.keymap";
-      const prev = await readRepoFile(repoPath, rel);
-      const next = updateHoldTapTuning(prev, patch.holdTap);
-      if (next !== prev) {
-        await writeRepoFile(repoPath, rel, next);
-        changedFiles.push(rel);
-      }
-    }
-    if (patch.trackpadHardware) {
-      const rel = "boards/shields/toucan/toucan_right.overlay";
-      const prev = await readRepoFile(repoPath, rel);
-      const next = updateTrackpadHardware(prev, patch.trackpadHardware);
-      if (next !== prev) {
-        await writeRepoFile(repoPath, rel, next);
-        changedFiles.push(rel);
-      }
-    }
-    if (patch.trackpadProcessors) {
-      const rel = "boards/shields/toucan/toucan.dtsi";
-      const prev = await readRepoFile(repoPath, rel);
-      const next = updateTrackpadProcessors(prev, patch.trackpadProcessors);
-      if (next !== prev) {
-        await writeRepoFile(repoPath, rel, next);
-        changedFiles.push(rel);
-      }
-    }
-    if (patch.leftOverlayGates) {
-      const rel = "boards/shields/toucan/toucan_left.overlay";
-      const prev = await readRepoFile(repoPath, rel);
-      const next = updateLeftOverlayGates(prev, patch.leftOverlayGates);
-      if (next !== prev) {
-        await writeRepoFile(repoPath, rel, next);
-        changedFiles.push(rel);
-      }
-    }
-    if (patch.customCFeatures) {
-      const zoomRel = "src/cg_zoom.c";
-      const navRel = "src/cg_nav.c";
-      const prevZoom = await readRepoFile(repoPath, zoomRel);
-      const prevNav = await readRepoFile(repoPath, navRel);
-      const { cgZoomC, cgNavC } = updateCustomCFeatures(
-        prevZoom,
-        prevNav,
-        patch.customCFeatures
-      );
-      if (cgZoomC !== prevZoom) {
-        await writeRepoFile(repoPath, zoomRel, cgZoomC);
-        changedFiles.push(zoomRel);
-      }
-      if (cgNavC !== prevNav) {
-        await writeRepoFile(repoPath, navRel, cgNavC);
-        changedFiles.push(navRel);
-      }
-    }
-    if (patch.helperSmoother) {
-      const rel = "host/macos/Sources/Core/ZoomSmoother.swift";
-      try {
-        const prev = await readRepoFile(repoPath, rel);
-        const next = updateHelperSmoother(prev, patch.helperSmoother);
-        if (next !== prev) {
-          await writeRepoFile(repoPath, rel, next);
-          changedFiles.push(rel);
-        }
-      } catch {
-        // helper file optional
-      }
-    }
-    if (patch.conf) {
-      const lRel = "boards/shields/toucan/toucan_left.conf";
-      const rRel = "boards/shields/toucan/toucan_right.conf";
-      const prevL = await readRepoFile(repoPath, lRel);
-      const prevR = await readRepoFile(repoPath, rRel);
-      const { leftConf, rightConf } = updateConfTuning(prevL, prevR, patch.conf);
-      if (leftConf !== prevL) {
-        await writeRepoFile(repoPath, lRel, leftConf);
-        changedFiles.push(lRel);
-      }
-      if (rightConf !== prevR) {
-        await writeRepoFile(repoPath, rRel, rightConf);
-        changedFiles.push(rRel);
-      }
-    }
+    const { applyFirmwarePatchFiles } = await import("./firmwareOps");
+    const changedFiles = await applyFirmwarePatchFiles(tauriRepoIo(repoPath), patch);
     return { changedFiles, model: await getFirmwareModel(repoPath) };
   }
 
@@ -279,13 +101,8 @@ export async function saveRepoKeymap(
   payload: RepoKeymapSavePayload
 ): Promise<FirmwareModel> {
   if (isTauriRuntime()) {
-    const { updateRepoKeymapSource } = await import("./keymapCodec");
-    const rel = "config/toucan.keymap";
-    const prev = await readRepoFile(repoPath, rel);
-    const next = updateRepoKeymapSource(prev, payload);
-    if (next !== prev) {
-      await writeRepoFile(repoPath, rel, next);
-    }
+    const { saveRepoKeymapFile } = await import("./firmwareOps");
+    await saveRepoKeymapFile(tauriRepoIo(repoPath), payload);
     return getFirmwareModel(repoPath);
   }
   const data = await postApi<{ model: FirmwareModel }>("keymap/save", {
@@ -300,11 +117,8 @@ export async function upsertCustomBehavior(
   behavior: CustomBehaviorDef
 ): Promise<FirmwareModel> {
   if (isTauriRuntime()) {
-    const { upsertCustomBehaviorNode } = await import("./keymapCodec");
-    const rel = behavior.sourceFile || "dts/cg_toggle.dtsi";
-    const prev = await readRepoFile(repoPath, rel).catch(() => "");
-    const next = upsertCustomBehaviorNode(prev, behavior);
-    await writeRepoFile(repoPath, rel, next);
+    const { upsertCustomBehaviorFile } = await import("./firmwareOps");
+    await upsertCustomBehaviorFile(tauriRepoIo(repoPath), behavior);
     return getFirmwareModel(repoPath);
   }
   const data = await postApi<{ model: FirmwareModel }>("behaviors/upsert", {
@@ -320,11 +134,8 @@ export async function deleteCustomBehavior(
   label: string
 ): Promise<FirmwareModel> {
   if (isTauriRuntime()) {
-    const { deleteCustomBehaviorNode } = await import("./keymapCodec");
-    const rel = sourceFile || "dts/cg_toggle.dtsi";
-    const prev = await readRepoFile(repoPath, rel);
-    const next = deleteCustomBehaviorNode(prev, label);
-    await writeRepoFile(repoPath, rel, next);
+    const { deleteCustomBehaviorFile } = await import("./firmwareOps");
+    await deleteCustomBehaviorFile(tauriRepoIo(repoPath), sourceFile, label);
     return getFirmwareModel(repoPath);
   }
   const data = await postApi<{ model: FirmwareModel }>("behaviors/delete", {

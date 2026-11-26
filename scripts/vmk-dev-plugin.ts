@@ -7,42 +7,24 @@ import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import {
-  parseConfTuning,
-  parseCustomBehaviors,
-  parseHoldTapTuning,
-  parseKeymapLayers,
-  parseTrackpadHardware,
-  parseTrackpadProcessors,
-  updateConfTuning,
-  updateHoldTapTuning,
-  updateTrackpadHardware,
-  updateTrackpadProcessors,
-} from "../src/vmk/dtsParser";
-import {
-  deleteCustomBehaviorNode,
-  parseCombos,
-  parseConditionalLayers,
-  updateRepoKeymapSource,
-  upsertCustomBehaviorNode,
-} from "../src/vmk/keymapCodec";
-import {
-  parseCustomCFeatures,
-  parseHelperSmoother,
-  parseLeftOverlayGates,
-  updateCustomCFeatures,
-  updateHelperSmoother,
-  updateLeftOverlayGates,
-} from "../src/vmk/customFirmwareCodec";
+  BUNDLE_FILES,
+  EDITABLE_FILE_DEFS,
+  applyFirmwarePatchFiles,
+  buildFirmwareModel,
+  deleteCustomBehaviorFile,
+  saveRepoKeymapFile,
+  upsertCustomBehaviorFile,
+  type FirmwareBundle,
+  type RepoFileIo,
+} from "../src/vmk/firmwareOps";
 import type {
   BootloaderStatus,
   BuiltArtifactInfo,
   CommandJob,
   CustomBehaviorDef,
-  EditableRepoFile,
   FirmwareModel,
   FirmwareTuningPatch,
   JobKind,
-  PhysicalKeyDef,
   RepoKeymapSavePayload,
   SnapshotSummary,
   StudioSnapshot,
@@ -52,34 +34,12 @@ import type {
 
 const execFileAsync = promisify(execFile);
 
-const LEFT_MARKERS = [
+/** Strings found only in the central (left) half's firmware. `LEFT_MARKERS` in vmk.rs must match. */
+export const LEFT_MARKERS = [
   "Studio Unlock",
   "studio_rpc_thread",
   "usbworkq",
   "HID Over GATT Send Work",
-];
-
-const EDITABLE_FILE_DEFS: Array<{
-  relPath: string;
-  label: string;
-  category: EditableRepoFile["category"];
-}> = [
-  { relPath: "config/toucan.keymap", label: "toucan.keymap", category: "keymap" },
-  { relPath: "dts/cg_toggle.dtsi", label: "cg_toggle.dtsi", category: "behavior" },
-  { relPath: "config/toucan_left.overlay", label: "config/toucan_left.overlay", category: "behavior" },
-  { relPath: "config/toucan_right.overlay", label: "config/toucan_right.overlay", category: "behavior" },
-  { relPath: "boards/shields/toucan/toucan.dtsi", label: "shields/toucan.dtsi", category: "shield" },
-  { relPath: "boards/shields/toucan/toucan_left.overlay", label: "shields/toucan_left.overlay", category: "shield" },
-  { relPath: "boards/shields/toucan/toucan_right.overlay", label: "shields/toucan_right.overlay", category: "shield" },
-  { relPath: "boards/shields/toucan/toucan_left.conf", label: "toucan_left.conf", category: "config" },
-  { relPath: "boards/shields/toucan/toucan_right.conf", label: "toucan_right.conf", category: "config" },
-  { relPath: "Kconfig", label: "Kconfig", category: "config" },
-  { relPath: "src/cg_toggle.c", label: "src/cg_toggle.c", category: "source" },
-  { relPath: "src/cg_zoom.c", label: "src/cg_zoom.c", category: "source" },
-  { relPath: "src/cg_nav.c", label: "src/cg_nav.c", category: "source" },
-  { relPath: "src/input_processor_double_tap.c", label: "src/input_processor_double_tap.c", category: "source" },
-  { relPath: "src/split_input_relay.c", label: "src/split_input_relay.c", category: "source" },
-  { relPath: "host/macos/Sources/Core/ZoomSmoother.swift", label: "ZoomSmoother.swift", category: "helper" },
 ];
 
 export function defaultWorkspacePaths(): VmkWorkspacePaths {
@@ -110,8 +70,19 @@ function mergePaths(partial?: Partial<VmkWorkspacePaths>): VmkWorkspacePaths {
   };
 }
 
+/**
+ * Resolves a repository-relative path, refusing anything that leaves the
+ * repository or names a `.git` directory. `safe_join` in vmk.rs applies the
+ * same rules; testdata/backend-parity.json holds the cases both must pass.
+ */
 export function assertInside(rootDir: string, relPath: string): string {
   const resolvedRoot = path.resolve(rootDir);
+  const segments = relPath.split(/[\\/]/);
+  // A ".." is refused even when the result would stay inside the root, so the
+  // decision does not depend on how the path happens to normalise.
+  if (path.isAbsolute(relPath) || segments.includes("..")) {
+    throw new Error(`Path escapes workspace root: ${relPath}`);
+  }
   const resolved = path.resolve(resolvedRoot, relPath);
   if (
     resolved !== resolvedRoot &&
@@ -119,11 +90,17 @@ export function assertInside(rootDir: string, relPath: string): string {
   ) {
     throw new Error(`Path escapes workspace root: ${relPath}`);
   }
-  const normalizedRel = path.relative(resolvedRoot, resolved);
-  if (normalizedRel === ".git" || normalizedRel.startsWith(`.git${path.sep}`)) {
+  // Compared without regard to case: the default macOS and Windows file
+  // systems open ".GIT" as ".git".
+  if (segments.some((segment) => segment.toLowerCase() === ".git")) {
     throw new Error("Modifying .git internals is not permitted.");
   }
   return resolved;
+}
+
+/** A bare `test-*.sh` file name. `is_valid_test_script_name` in vmk.rs applies the same rule. */
+export function isValidTestScriptName(name: string): boolean {
+  return /^test-[A-Za-z0-9_-]+\.sh$/.test(name);
 }
 
 async function fileExists(p: string): Promise<boolean> {
@@ -372,198 +349,63 @@ async function readTextIfExists(p: string): Promise<string> {
   }
 }
 
-export async function readFirmwareModel(repoPath: string): Promise<FirmwareModel> {
-  const keymapContent = await readTextIfExists(path.join(repoPath, "config/toucan.keymap"));
-  const leftOverlay = await readTextIfExists(
-    path.join(repoPath, "boards/shields/toucan/toucan_left.overlay")
-  );
-  const rightOverlay = await readTextIfExists(
-    path.join(repoPath, "boards/shields/toucan/toucan_right.overlay")
-  );
-  const toucanDtsi = await readTextIfExists(
-    path.join(repoPath, "boards/shields/toucan/toucan.dtsi")
-  );
-  const leftConf = await readTextIfExists(
-    path.join(repoPath, "boards/shields/toucan/toucan_left.conf")
-  );
-  const rightConf = await readTextIfExists(
-    path.join(repoPath, "boards/shields/toucan/toucan_right.conf")
-  );
-  const kconfig = await readTextIfExists(path.join(repoPath, "Kconfig"));
-  const cgZoomC = await readTextIfExists(path.join(repoPath, "src/cg_zoom.c"));
-  const cgNavC = await readTextIfExists(path.join(repoPath, "src/cg_nav.c"));
-  const smootherSwift = await readTextIfExists(
-    path.join(repoPath, "host/macos/Sources/Core/ZoomSmoother.swift")
-  );
+/** File access confined to the firmware repository. */
+function repoFileIo(repoPath: string): RepoFileIo {
+  return {
+    read: (relPath) => fsp.readFile(assertInside(repoPath, relPath), "utf8"),
+    write: (relPath, content) => fsp.writeFile(assertInside(repoPath, relPath), content, "utf8"),
+  };
+}
 
-  // Scan dts/*.dtsi for custom behaviors
-  const customBehaviors = [];
+/** Node counterpart of the `vmk_read_firmware_bundle` Tauri command. */
+export async function readFirmwareBundle(repoPath: string): Promise<FirmwareBundle> {
+  const texts = {} as Record<keyof typeof BUNDLE_FILES, string>;
+  for (const [field, relPath] of Object.entries(BUNDLE_FILES)) {
+    texts[field as keyof typeof BUNDLE_FILES] = await readTextIfExists(path.join(repoPath, relPath));
+  }
+
+  const dtsFiles: FirmwareBundle["dtsFiles"] = [];
   const dtsDir = path.join(repoPath, "dts");
   if (await fileExists(dtsDir)) {
     const entries = await fsp.readdir(dtsDir);
     for (const file of entries.filter((f) => f.endsWith(".dtsi")).sort()) {
-      const content = await readTextIfExists(path.join(dtsDir, file));
-      customBehaviors.push(...parseCustomBehaviors(content, `dts/${file}`));
+      dtsFiles.push({
+        relPath: `dts/${file}`,
+        content: await readTextIfExists(path.join(dtsDir, file)),
+      });
     }
   }
 
-  // Parse physical layout from config/toucan.json
-  let physicalLayout: PhysicalKeyDef[] = [];
-  const jsonRaw = await readTextIfExists(path.join(repoPath, "config/toucan.json"));
-  if (jsonRaw) {
-    try {
-      const parsed = JSON.parse(jsonRaw);
-      const firstLayout = Object.values(parsed.layouts || {})[0] as
-        | { layout?: PhysicalKeyDef[] }
-        | undefined;
-      if (firstLayout?.layout) {
-        physicalLayout = firstLayout.layout;
-      }
-    } catch {
-      // ignore invalid json
-    }
-  }
-
-  const dirtySet = new Set<string>();
+  const dirtyFiles: string[] = [];
   try {
     const { stdout } = await execFileAsync("git", ["-C", repoPath, "status", "--porcelain"]);
     for (const line of stdout.split("\n")) {
       const rel = line.slice(3).trim();
-      if (rel) dirtySet.add(rel);
+      if (rel) dirtyFiles.push(rel);
     }
   } catch {
-    // ignore
+    // Not a git repository, or git is unavailable: nothing is reported as modified.
   }
 
-  const editableFiles: EditableRepoFile[] = await Promise.all(
+  const existingEditable = await Promise.all(
     EDITABLE_FILE_DEFS.map(async (f) => ({
-      ...f,
+      relPath: f.relPath,
       exists: await fileExists(path.join(repoPath, f.relPath)),
-      modified: dirtySet.has(f.relPath),
     }))
   );
 
-  return {
-    repoPath,
-    customBehaviors,
-    holdTap: parseHoldTapTuning(keymapContent),
-    trackpadHardware: parseTrackpadHardware(rightOverlay),
-    trackpadProcessors: parseTrackpadProcessors(toucanDtsi),
-    leftOverlayGates: parseLeftOverlayGates(leftOverlay),
-    customCFeatures: parseCustomCFeatures(cgZoomC, cgNavC),
-    helperSmoother: parseHelperSmoother(smootherSwift),
-    conf: parseConfTuning(leftConf, rightConf, kconfig),
-    physicalLayout,
-    repoKeymapLayers: parseKeymapLayers(keymapContent),
-    conditionalLayers: parseConditionalLayers(keymapContent),
-    combos: parseCombos(keymapContent),
-    editableFiles,
-  };
+  return { ...texts, repoPath, dtsFiles, dirtyFiles, existingEditable };
+}
+
+export async function readFirmwareModel(repoPath: string): Promise<FirmwareModel> {
+  return buildFirmwareModel(await readFirmwareBundle(repoPath));
 }
 
 export async function applyFirmwarePatch(
   repoPath: string,
   patch: FirmwareTuningPatch
 ): Promise<{ changedFiles: string[]; model: FirmwareModel }> {
-  const changedFiles: string[] = [];
-
-  if (patch.holdTap) {
-    const rel = "config/toucan.keymap";
-    const full = assertInside(repoPath, rel);
-    const prev = await fsp.readFile(full, "utf8");
-    const next = updateHoldTapTuning(prev, patch.holdTap);
-    if (next !== prev) {
-      await fsp.writeFile(full, next, "utf8");
-      changedFiles.push(rel);
-    }
-  }
-
-  if (patch.trackpadHardware) {
-    const rel = "boards/shields/toucan/toucan_right.overlay";
-    const full = assertInside(repoPath, rel);
-    const prev = await fsp.readFile(full, "utf8");
-    const next = updateTrackpadHardware(prev, patch.trackpadHardware);
-    if (next !== prev) {
-      await fsp.writeFile(full, next, "utf8");
-      changedFiles.push(rel);
-    }
-  }
-
-  if (patch.trackpadProcessors) {
-    const rel = "boards/shields/toucan/toucan.dtsi";
-    const full = assertInside(repoPath, rel);
-    const prev = await fsp.readFile(full, "utf8");
-    const next = updateTrackpadProcessors(prev, patch.trackpadProcessors);
-    if (next !== prev) {
-      await fsp.writeFile(full, next, "utf8");
-      changedFiles.push(rel);
-    }
-  }
-
-  if (patch.leftOverlayGates) {
-    const rel = "boards/shields/toucan/toucan_left.overlay";
-    const full = assertInside(repoPath, rel);
-    const prev = await fsp.readFile(full, "utf8");
-    const next = updateLeftOverlayGates(prev, patch.leftOverlayGates);
-    if (next !== prev) {
-      await fsp.writeFile(full, next, "utf8");
-      changedFiles.push(rel);
-    }
-  }
-
-  if (patch.customCFeatures) {
-    const zoomRel = "src/cg_zoom.c";
-    const navRel = "src/cg_nav.c";
-    const zoomFull = assertInside(repoPath, zoomRel);
-    const navFull = assertInside(repoPath, navRel);
-    const prevZoom = await fsp.readFile(zoomFull, "utf8");
-    const prevNav = await fsp.readFile(navFull, "utf8");
-    const { cgZoomC, cgNavC } = updateCustomCFeatures(
-      prevZoom,
-      prevNav,
-      patch.customCFeatures
-    );
-    if (cgZoomC !== prevZoom) {
-      await fsp.writeFile(zoomFull, cgZoomC, "utf8");
-      changedFiles.push(zoomRel);
-    }
-    if (cgNavC !== prevNav) {
-      await fsp.writeFile(navFull, cgNavC, "utf8");
-      changedFiles.push(navRel);
-    }
-  }
-
-  if (patch.helperSmoother) {
-    const rel = "host/macos/Sources/Core/ZoomSmoother.swift";
-    const full = assertInside(repoPath, rel);
-    if (await fileExists(full)) {
-      const prev = await fsp.readFile(full, "utf8");
-      const next = updateHelperSmoother(prev, patch.helperSmoother);
-      if (next !== prev) {
-        await fsp.writeFile(full, next, "utf8");
-        changedFiles.push(rel);
-      }
-    }
-  }
-
-  if (patch.conf) {
-    const leftRel = "boards/shields/toucan/toucan_left.conf";
-    const rightRel = "boards/shields/toucan/toucan_right.conf";
-    const leftFull = assertInside(repoPath, leftRel);
-    const rightFull = assertInside(repoPath, rightRel);
-    const prevLeft = await fsp.readFile(leftFull, "utf8");
-    const prevRight = await fsp.readFile(rightFull, "utf8");
-    const { leftConf, rightConf } = updateConfTuning(prevLeft, prevRight, patch.conf);
-    if (leftConf !== prevLeft) {
-      await fsp.writeFile(leftFull, leftConf, "utf8");
-      changedFiles.push(leftRel);
-    }
-    if (rightConf !== prevRight) {
-      await fsp.writeFile(rightFull, rightConf, "utf8");
-      changedFiles.push(rightRel);
-    }
-  }
-
+  const changedFiles = await applyFirmwarePatchFiles(repoFileIo(repoPath), patch);
   return { changedFiles, model: await readFirmwareModel(repoPath) };
 }
 
@@ -805,13 +647,7 @@ export function vmkDevPlugin(): Plugin {
               payload: RepoKeymapSavePayload;
             }>(req);
             const paths = mergePaths({ firmwareRepoPath: body.repoPath });
-            const rel = "config/toucan.keymap";
-            const full = assertInside(paths.firmwareRepoPath, rel);
-            const prev = await fsp.readFile(full, "utf8");
-            const next = updateRepoKeymapSource(prev, body.payload);
-            if (next !== prev) {
-              await fsp.writeFile(full, next, "utf8");
-            }
+            await saveRepoKeymapFile(repoFileIo(paths.firmwareRepoPath), body.payload);
             return sendJson(res, 200, {
               ok: true,
               model: await readFirmwareModel(paths.firmwareRepoPath),
@@ -824,11 +660,7 @@ export function vmkDevPlugin(): Plugin {
               behavior: CustomBehaviorDef;
             }>(req);
             const paths = mergePaths({ firmwareRepoPath: body.repoPath });
-            const rel = body.behavior.sourceFile || "dts/cg_toggle.dtsi";
-            const full = assertInside(paths.firmwareRepoPath, rel);
-            const prev = await readTextIfExists(full);
-            const next = upsertCustomBehaviorNode(prev, body.behavior);
-            await fsp.writeFile(full, next, "utf8");
+            await upsertCustomBehaviorFile(repoFileIo(paths.firmwareRepoPath), body.behavior);
             return sendJson(res, 200, {
               ok: true,
               model: await readFirmwareModel(paths.firmwareRepoPath),
@@ -842,11 +674,11 @@ export function vmkDevPlugin(): Plugin {
               label: string;
             }>(req);
             const paths = mergePaths({ firmwareRepoPath: body.repoPath });
-            const rel = body.sourceFile || "dts/cg_toggle.dtsi";
-            const full = assertInside(paths.firmwareRepoPath, rel);
-            const prev = await fsp.readFile(full, "utf8");
-            const next = deleteCustomBehaviorNode(prev, body.label);
-            await fsp.writeFile(full, next, "utf8");
+            await deleteCustomBehaviorFile(
+              repoFileIo(paths.firmwareRepoPath),
+              body.sourceFile,
+              body.label
+            );
             return sendJson(res, 200, {
               ok: true,
               model: await readFirmwareModel(paths.firmwareRepoPath),
@@ -949,8 +781,8 @@ export function vmkDevPlugin(): Plugin {
               return sendJson(res, 200, { job });
             }
             if (body.kind === "test-single") {
-              const script = path.basename(body.scriptName || "test-host.sh");
-              if (!/^test-[A-Za-z0-9_-]+\.sh$/.test(script)) {
+              const script = body.scriptName || "test-host.sh";
+              if (!isValidTestScriptName(script)) {
                 return sendJson(res, 400, { error: `Invalid test script name: ${script}` });
               }
               const job = startJob("test-single", "sh", [`scripts/${script}`], repo, baseEnv);
