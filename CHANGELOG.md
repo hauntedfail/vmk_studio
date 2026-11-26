@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+
+* **Local API request guard**: The `/api/vmk/*` API served by `npm run dev` now answers only on a loopback host, rejects cross-origin and cross-site requests, and requires a JSON content type. Before this, any web page open in the browser while the dev server ran could write files to a folder of its choice and start the build and test scripts, and a DNS-rebinding page could also read files. The desktop app does not use this API and is not affected.
+
 ## [0.4.0] (2026-11-26)
 
 First release of **VMK Studio**, forked from ZMK Studio `v0.3.1` for custom firmware workflows (including beekeeb Toucan 2).

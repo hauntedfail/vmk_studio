@@ -3,8 +3,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import {
   assertInside,
+  checkLocalApiRequest,
+  vmkDevPlugin,
   scanUf2CentralMarkers,
   inspectBootloaderAt,
   inspectArtifact,
@@ -203,5 +207,142 @@ describe("vmkDevPlugin safety and workspace helpers", () => {
     ]);
     expect(patched.model.holdTap.mtQuickTapMs).toBe(165);
     expect(patched.model.leftOverlayGates.twoFingerDoubleTapEnabled).toBe(false);
+  });
+});
+
+describe("local API request guard", () => {
+  const sameOrigin = {
+    host: "localhost:5173",
+    origin: "http://localhost:5173",
+    "sec-fetch-site": "same-origin",
+    "content-type": "application/json",
+  };
+
+  it("accepts the app's own requests and a local client without an Origin", () => {
+    expect(checkLocalApiRequest(sameOrigin)).toEqual({ ok: true });
+    expect(
+      checkLocalApiRequest({ host: "127.0.0.1:5173", "content-type": "application/json; charset=utf-8" })
+    ).toEqual({ ok: true });
+    expect(checkLocalApiRequest({ host: "[::1]:5173", "content-type": "application/json" })).toEqual({ ok: true });
+  });
+
+  it("rejects another site's page, whatever content type it sends", () => {
+    for (const contentType of ["text/plain", "application/json"]) {
+      expect(
+        checkLocalApiRequest({ ...sameOrigin, origin: "https://evil.example", "content-type": contentType })
+      ).toMatchObject({ ok: false, status: 403 });
+    }
+    expect(checkLocalApiRequest({ ...sameOrigin, origin: "null" })).toMatchObject({ ok: false, status: 403 });
+    expect(checkLocalApiRequest({ ...sameOrigin, origin: "http://localhost:9999" })).toMatchObject({
+      ok: false,
+      status: 403,
+    });
+    expect(checkLocalApiRequest({ ...sameOrigin, origin: undefined, "sec-fetch-site": "cross-site" })).toMatchObject({
+      ok: false,
+      status: 403,
+    });
+  });
+
+  it("rejects a host name that only resolves to this machine", () => {
+    for (const host of ["evil.example:5173", "localhost.evil.example", "192.168.1.20:5173", ""]) {
+      expect(checkLocalApiRequest({ host, "content-type": "application/json" })).toMatchObject({
+        ok: false,
+        status: 403,
+      });
+    }
+    expect(checkLocalApiRequest({ "content-type": "application/json" })).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it("rejects a body that a cross-origin form could send without a preflight", () => {
+    for (const contentType of ["text/plain", "application/x-www-form-urlencoded", undefined]) {
+      expect(checkLocalApiRequest({ host: "localhost:5173", "content-type": contentType })).toMatchObject({
+        ok: false,
+        status: 415,
+      });
+    }
+  });
+});
+
+describe("local API over HTTP", () => {
+  let server: http.Server | undefined;
+
+  afterEach(async () => {
+    await new Promise((resolve) => (server ? server.close(resolve) : resolve(undefined)));
+    server = undefined;
+  });
+
+  async function startApi(): Promise<number> {
+    type Handler = (req: http.IncomingMessage, res: http.ServerResponse, next: () => void) => void;
+    let handler: Handler | undefined;
+    const plugin = vmkDevPlugin();
+    const configure = plugin.configureServer as (s: { middlewares: { use: (h: Handler) => void } }) => void;
+    configure({ middlewares: { use: (h) => (handler = h) } });
+    server = http.createServer((req, res) =>
+      handler!(req, res, () => {
+        res.statusCode = 404;
+        res.end();
+      })
+    );
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    return (server.address() as AddressInfo).port;
+  }
+
+  function post(
+    port: number,
+    endpoint: string,
+    headers: Record<string, string>,
+    body: unknown
+  ): Promise<{ status: number; body: string }> {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        { host: "127.0.0.1", port, path: `/api/vmk/${endpoint}`, method: "POST", headers },
+        (res) => {
+          let text = "";
+          res.on("data", (c) => (text += c));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, body: text }));
+        }
+      );
+      req.on("error", reject);
+      req.end(JSON.stringify(body));
+    });
+  }
+
+  it("writes for the app and refuses the same request from another origin or host", async () => {
+    const repo = await makeTempDir("vmk-api-");
+    const port = await startApi();
+    const target = path.join(repo, "probe.txt");
+    const write = { repoPath: repo, relPath: "probe.txt", content: "from the app" };
+    const own = { Host: `localhost:${port}`, Origin: `http://localhost:${port}`, "Content-Type": "application/json" };
+
+    const foreign = await post(
+      port,
+      "write-file",
+      { Host: `localhost:${port}`, Origin: "https://evil.example", "Content-Type": "text/plain" },
+      { ...write, content: "from another site" }
+    );
+    expect(foreign.status).toBe(403);
+    await expect(fs.access(target)).rejects.toThrow();
+
+    const rebound = await post(
+      port,
+      "write-file",
+      { Host: `evil.example:${port}`, "Content-Type": "application/json" },
+      { ...write, content: "from a rebound name" }
+    );
+    expect(rebound.status).toBe(403);
+    await expect(fs.access(target)).rejects.toThrow();
+
+    const ok = await post(port, "write-file", own, write);
+    expect(ok.status).toBe(200);
+    expect(await fs.readFile(target, "utf8")).toBe("from the app");
+
+    const read = await post(
+      port,
+      "read-file",
+      { Host: `evil.example:${port}`, "Content-Type": "application/json" },
+      { repoPath: repo, relPath: "probe.txt" }
+    );
+    expect(read.status).toBe(403);
+    expect(read.body).not.toContain("from the app");
   });
 });

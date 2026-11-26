@@ -711,13 +711,65 @@ function sendJson(res: ServerResponse, status: number, payload: unknown) {
   res.end(JSON.stringify(payload));
 }
 
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+export type LocalApiVerdict = { ok: true } | { ok: false; status: number; error: string };
+
+/**
+ * Decides whether a request may use the local API, which writes files and
+ * starts build and flash scripts with the developer's privileges.
+ *
+ * A web page on another site can make the browser send a POST here, and a
+ * hostile DNS name can resolve to this machine. So the request must name a
+ * loopback host, must not come from another origin, and must carry a JSON
+ * content type, which a cross-origin page cannot send without a preflight
+ * that this server never approves. A local program that sends no Origin
+ * header is allowed: it already runs as the developer.
+ */
+export function checkLocalApiRequest(headers: {
+  host?: string;
+  origin?: string;
+  "sec-fetch-site"?: string;
+  "content-type"?: string;
+}): LocalApiVerdict {
+  const host = (headers.host || "").toLowerCase();
+  const hostname = host.startsWith("[") ? host.slice(0, host.indexOf("]") + 1) : host.split(":")[0];
+  if (!LOOPBACK_HOSTNAMES.has(hostname)) {
+    return { ok: false, status: 403, error: "The VMK local API only answers on a loopback host." };
+  }
+  if (headers.origin !== undefined) {
+    let originHost = "";
+    try {
+      originHost = new URL(headers.origin).host.toLowerCase();
+    } catch {
+      // An opaque origin such as "null" never matches.
+    }
+    if (originHost !== host) {
+      return { ok: false, status: 403, error: "The VMK local API rejects cross-origin requests." };
+    }
+  }
+  const site = headers["sec-fetch-site"];
+  if (site !== undefined && site !== "same-origin") {
+    return { ok: false, status: 403, error: "The VMK local API rejects cross-site requests." };
+  }
+  const contentType = (headers["content-type"] || "").split(";")[0].trim().toLowerCase();
+  if (contentType !== "application/json") {
+    return { ok: false, status: 415, error: "The VMK local API requires Content-Type: application/json." };
+  }
+  return { ok: true };
+}
+
 export function vmkDevPlugin(): Plugin {
   return {
     name: "vmk-studio-local-api",
-    configureServer(server: ViteDevServer) {
+    configureServer(server: Pick<ViteDevServer, "middlewares">) {
       server.middlewares.use(async (req, res, next) => {
         if (!req.url || !req.url.startsWith("/api/vmk/")) {
           return next();
+        }
+        const verdict = checkLocalApiRequest(req.headers as Record<string, string | undefined>);
+        if (!verdict.ok) {
+          return sendJson(res, verdict.status, { error: verdict.error });
         }
         const urlObj = new URL(req.url, "http://localhost");
         const endpoint = urlObj.pathname.replace(/^\/api\/vmk\//, "");
